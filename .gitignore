@@ -1,0 +1,19 @@
+# Credentials - never commit
+creds.txt
+*.tfvars
+!terraform.tfvars.example
+
+# OpenTofu / Terraform state and local cache
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# Build artifacts
+.build/
+*.zip
+
+# OS
+.DS_Store

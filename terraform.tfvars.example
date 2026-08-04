@@ -1,0 +1,30 @@
+# Copy to terraform.tfvars (already gitignored) to set non-sensitive overrides,
+# OR simply keep the defaults from variables.tf.
+#
+# Sensitive values (aws_access_key_id, aws_secret_access_key, aws_session_token,
+# harness_platform_api_key, github_token) must NOT be placed here. Export them
+# as TF_VAR_* environment variables instead, e.g.:
+#
+#   export TF_VAR_aws_access_key_id="..."
+#   export TF_VAR_aws_secret_access_key="..."
+#   export TF_VAR_aws_session_token="..."
+#   export TF_VAR_harness_platform_api_key="..."
+#   export TF_VAR_github_token="..."
+
+aws_region = "us-east-1"
+
+function_name                = "lambda-service-poc"
+runtime                      = "nodejs20.x"
+handler                      = "index.handler"
+memory_size                  = 128
+timeout                      = 10
+lambda_environment_variables = {}
+
+harness_account_id   = "aBh2PBI0T1CYMmA6iQFosg"
+harness_org_id       = "default"
+harness_project_id   = "lambda_service_poc"
+harness_project_name = "Lambda Service POC"
+
+github_owner     = "kartikkaushik27"
+github_repo_name = "lambda-service-setup"
+github_branch    = "main"
