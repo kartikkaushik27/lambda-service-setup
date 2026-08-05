@@ -401,8 +401,8 @@ pipeline:
                       apk add --no-cache aws-cli >/dev/null
 
                       aws lambda invoke \
-                        --function-name "<+repeat.item.split(\"~\")[4]>" \
-                        --region "<+repeat.item.split(\"~\")[6]>" \
+                        --function-name "<+repeat.item.split("~")[4]>" \
+                        --region "<+repeat.item.split("~")[6]>" \
                         --payload '{}' \
                         --cli-binary-format raw-in-base64-out \
                         /tmp/response.json > /tmp/invoke-meta.json
@@ -420,7 +420,7 @@ pipeline:
                       fi
 
                       if grep -Eq '"statusCode":[[:space:]]*200' /tmp/response.json; then
-                        echo "PASS: <+repeat.item.split(\"~\")[4]> responded with statusCode 200"
+                        echo "PASS: <+repeat.item.split("~")[4]> responded with statusCode 200"
                       else
                         echo "FAIL: unexpected response payload"
                         exit 1
