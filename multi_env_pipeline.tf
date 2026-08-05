@@ -27,6 +27,10 @@ resource "harness_platform_pipeline" "multi_env" {
     credentials_variable_set = harness_platform_infra_variable_set.credentials.identifier
     harness_pat_secret       = harness_platform_secret_text.harness_pat.identifier
 
+    # environments/<project_name>.tfvars for the original project, pinned to
+    # its own dedicated pipeline (pipeline.tf) - this pipeline must skip it.
+    legacy_project_name = local.project_name
+
     ci_image               = var.ci_image
     workspace_step_timeout = var.multi_env_workspace_step_timeout
     iacm_step_timeout      = var.multi_env_iacm_step_timeout

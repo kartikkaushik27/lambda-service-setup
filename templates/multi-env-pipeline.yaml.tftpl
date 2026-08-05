@@ -58,6 +58,12 @@ pipeline:
                         [ -e "$f" ] || continue
                         project=$(basename "$f" .tfvars)
 
+                        # The original project is pinned to its own dedicated
+                        # pipeline/workspace (pipeline.tf, harness.tf) and
+                        # already owns the AWS Lambda function named here -
+                        # this self-service flow must not also manage it.
+                        [ "$project" = "${legacy_project_name}" ] && continue
+
                         for region in $regions; do
                           parsed=$(python3 scripts/parse_lambdas.py "$f" "$region")
                           echo "$parsed" | jq -c '.lambdas[]' > /tmp/build_lambdas.ndjson
@@ -155,6 +161,10 @@ pipeline:
                       for f in environments/*.tfvars; do
                         [ -e "$f" ] || continue
                         project=$(basename "$f" .tfvars)
+
+                        # See the matching skip in the Build Artifacts stage.
+                        [ "$project" = "${legacy_project_name}" ] && continue
+
                         project_key=$(echo "$project" | tr '-' '_')
 
                         for region in $regions; do
