@@ -3,9 +3,10 @@ creds.txt
 *.tfvars
 !terraform.tfvars.example
 
-# Generated inputs for the IACM stage. Must be committed: the pipeline reads
-# it from the repository. Contains no secrets by construction.
-!iacm/config.auto.tfvars
+# Non-secret project definitions for the self-service workspace flow (see
+# iacm/variables.tf). Must be committed: pushing one is what creates a
+# project's workspaces and deployments.
+!environments/*.tfvars
 
 # OpenTofu / Terraform state and local cache
 .terraform/

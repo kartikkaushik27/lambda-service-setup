@@ -95,18 +95,20 @@ resource "local_file" "lambda_function_definition" {
   })
 }
 
-# Non-secret inputs for the OpenTofu the IACM stage runs. Named *.auto.tfvars
-# so OpenTofu loads it automatically from iacm/, which is what lets the
-# workspace itself declare no variables at all.
-resource "local_file" "iacm_config" {
-  filename        = "${path.module}/iacm/config.auto.tfvars"
+# Non-secret inputs for the OpenTofu the IACM stage runs, in exactly the
+# schema every self-service project's environments/*.tfvars file uses (see
+# iacm/variables.tf). Linked to this project's workspace as a Git variable
+# file (harness.tf) rather than left as a *.auto.tfvars file inside iacm/,
+# which every workspace sharing that folder would auto-load regardless of
+# which project it belongs to.
+resource "local_file" "project_tfvars" {
+  filename        = "${path.module}/environments/${local.project_name}.tfvars"
   file_permission = "0644"
 
-  content = templatefile("${path.module}/templates/config.auto.tfvars.tftpl", {
-    project_name     = local.project_name
-    region           = var.aws_region
-    environment_name = var.environment
-    lambda_key       = local.lambda_key
+  content = templatefile("${path.module}/templates/project.tfvars.tftpl", {
+    project_name = local.project_name
+    region       = var.aws_region
+    lambda_key   = local.lambda_key
 
     runtime               = var.runtime
     handler               = var.handler

@@ -151,9 +151,10 @@ resource "harness_platform_infra_variable_set" "credentials" {
   }
 }
 
-# Deliberately holds no variables of its own: the non-secret inputs are
-# committed next to the configuration as iacm/config.auto.tfvars, which
-# OpenTofu loads automatically. The workspace only says *where* to run.
+# Non-secret inputs come from environments/lambda-service-poc.tfvars (rendered
+# above) plus the three variables below - the exact same mechanism the
+# environment-creation pipeline uses for every self-service workspace it
+# creates (environment_pipeline.tf), so there is exactly one way this works.
 resource "harness_platform_workspace" "this" {
   identifier  = "lambda_iacm_workspace"
   name        = "Lambda IACM Workspace"
@@ -172,4 +173,31 @@ resource "harness_platform_workspace" "this" {
   cost_estimation_enabled = var.cost_estimation_enabled
 
   variable_sets = [harness_platform_infra_variable_set.credentials.identifier]
+
+  terraform_variable_file {
+    repository           = "https://github.com/${var.github_owner}/${var.github_repo_name}"
+    repository_branch    = var.github_branch
+    repository_connector = var.github_connector_id
+    repository_path      = "environments/${local.project_name}.tfvars"
+  }
+
+  terraform_variable {
+    key        = "region"
+    value      = var.aws_region
+    value_type = "string"
+  }
+
+  terraform_variable {
+    key        = "environment_name"
+    value      = var.environment
+    value_type = "string"
+  }
+
+  terraform_variable {
+    key        = "manage_environment"
+    value      = "false"
+    value_type = "string"
+  }
+
+  depends_on = [local_file.project_tfvars]
 }
