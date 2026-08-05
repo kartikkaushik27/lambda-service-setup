@@ -26,14 +26,14 @@ harness = {
 
 lambdas = {
   ${lambda_key} = {
-    runtime                = "${runtime}"
-    handler                = "${handler}"
-    timeout                = ${timeout}
-    memory_size            = ${memory_size}
-    execution_role_arn     = "${execution_role_arn}"
-    architecture           = "${architecture}"
-    publish_version        = ${publish_version}
-    environment_variables  = ${environment_variables}
+    runtime               = "${runtime}"
+    handler               = "${handler}"
+    timeout               = ${timeout}
+    memory_size           = ${memory_size}
+    execution_role_arn    = "${execution_role_arn}"
+    architecture          = "${architecture}"
+    publish_version       = ${publish_version}
+    environment_variables = ${environment_variables}
 
     artifact_by_region = {
       "${region}" = {
@@ -47,8 +47,8 @@ lambdas = {
     # Pins this project's existing identifiers so migrating onto the shared
     # multi-lambda schema does not rename or recreate anything.
     function_name              = "${function_name}"
-    service_identifier          = "${service_identifier}"
-    artifact_source_identifier  = "${artifact_source_identifier}"
+    service_identifier         = "${service_identifier}"
+    artifact_source_identifier = "${artifact_source_identifier}"
   }
 }
 

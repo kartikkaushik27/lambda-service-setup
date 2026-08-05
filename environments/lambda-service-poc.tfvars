@@ -26,14 +26,14 @@ harness = {
 
 lambdas = {
   lambda_service = {
-    runtime                = "nodejs20.x"
-    handler                = "index.handler"
-    timeout                = 10
-    memory_size            = 128
-    execution_role_arn     = "arn:aws:iam::915632791698:role/lambda-service-poc-exec-role"
-    architecture           = "x86_64"
-    publish_version        = true
-    environment_variables  = {}
+    runtime               = "nodejs20.x"
+    handler               = "index.handler"
+    timeout               = 10
+    memory_size           = 128
+    execution_role_arn    = "arn:aws:iam::915632791698:role/lambda-service-poc-exec-role"
+    architecture          = "x86_64"
+    publish_version       = true
+    environment_variables = {}
 
     artifact_by_region = {
       "us-east-1" = {
@@ -47,8 +47,8 @@ lambdas = {
     # Pins this project's existing identifiers so migrating onto the shared
     # multi-lambda schema does not rename or recreate anything.
     function_name              = "lambda-service-poc"
-    service_identifier          = "lambda_service"
-    artifact_source_identifier  = "lambda_artifact"
+    service_identifier         = "lambda_service"
+    artifact_source_identifier = "lambda_artifact"
   }
 }
 

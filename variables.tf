@@ -217,25 +217,30 @@ variable "provisioner_version" {
 }
 
 # ---------------------------------------------------------------------------
-# Self-service environment pipeline (environment_pipeline.tf)
+# Multi-environment pipeline (multi_env_pipeline.tf)
+#
+# One pipeline, triggered by pushes to dev/test/stage/prod, that creates one
+# IACM workspace per (project, region) the branch owns and runs every stage
+# after that as a Harness looping strategy over those workspaces - see
+# templates/multi-env-pipeline.yaml.tftpl for the full flow.
 # ---------------------------------------------------------------------------
 
-variable "environment_pipeline_provision_timeout" {
-  description = "Timeout for the step that provisions every workspace Create Workspaces touched, in Harness duration format. Needs headroom for N workspaces run one after another."
+variable "multi_env_workspace_step_timeout" {
+  description = "Timeout for the script step that creates/updates every IACM workspace for the triggering branch, in Harness duration format."
   type        = string
-  default     = "45m"
+  default     = "5m"
 }
 
-variable "environment_pipeline_poll_interval_seconds" {
-  description = "How often the environment pipeline polls a workspace's provisioning run for completion."
-  type        = number
-  default     = 15
+variable "multi_env_iacm_step_timeout" {
+  description = "Timeout for each init/plan/apply step in the repeated IACM stage."
+  type        = string
+  default     = "15m"
 }
 
-variable "environment_pipeline_poll_attempts" {
-  description = "How many times the environment pipeline polls before giving up on a single workspace's provisioning run."
+variable "multi_env_max_concurrency" {
+  description = "How many workspaces/deployments the looping strategies run in parallel. Keep modest - each iteration is a full IACM apply or Lambda deploy."
   type        = number
-  default     = 80
+  default     = 3
 }
 
 # ---------------------------------------------------------------------------

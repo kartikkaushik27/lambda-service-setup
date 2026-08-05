@@ -1,0 +1,331 @@
+pipeline:
+  name: ${pipeline_name}
+  identifier: ${pipeline_identifier}
+  projectIdentifier: ${project_id}
+  orgIdentifier: ${org_id}
+  description: "Triggered by a push to dev/test/stage/prod. Creates or updates one IACM workspace per (project, region) the branch owns, applies every one of them, deploys every lambda with the native AWS Lambda deploy step, then verifies each. Workspace creation is scripted (no native step for it); every other stage uses native Harness steps, run once per item via a looping strategy."
+  tags: {}
+  properties:
+    ci:
+      codebase:
+        connectorRef: ${github_connector_id}
+        repoName: ${github_repo_name}
+        build: <+input>
+  stages:
+    # -------------------------------------------------------------------
+    # 1. Create/update the IACM workspace for every environments/*.tfvars
+    #    project, for every region the triggering branch owns, and export
+    #    two lists for the looping strategies below:
+    #      WORKSPACE_IDS  - one entry per (project, region)
+    #      DEPLOY_ITEMS   - one entry per (project, lambda, region), with
+    #                       the exact service/environment/infra identifiers
+    #                       iacm/main.tf creates for it.
+    # -------------------------------------------------------------------
+    - stage:
+        name: Create Workspaces
+        identifier: create_workspaces
+        description: "Creates or updates the IACM workspace for every environments/*.tfvars project, for every region this branch owns. The only scripted step - IACM has no native step for creating a workspace."
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Create or Update Workspaces
+                  identifier: create_or_update_workspaces
+                  timeout: ${workspace_step_timeout}
+                  spec:
+                    shell: Sh
+                    image: ${ci_image}
+                    command: |-
+                      set -eu
+                      apk add --no-cache curl jq python3 >/dev/null
+
+                      account_id="<+account.identifier>"
+                      org_id="${org_id}"
+                      project_id="${project_id}"
+                      repo_url="${repo_url}"
+                      github_connector="${github_connector_id}"
+                      branch="<+codebase.branch>"
+                      base="https://app.harness.io/gateway/iacm/api/orgs/$org_id/projects/$project_id/workspaces"
+
+                      case "$branch" in
+                        dev) regions="us-east-1" ;;
+                        test|stage|prod) regions="us-east-1 us-west-1" ;;
+                        *)
+                          echo "Branch '$branch' owns no regions - nothing to do."
+                          export WORKSPACE_IDS="[]"
+                          export DEPLOY_ITEMS="[]"
+                          exit 0
+                          ;;
+                      esac
+
+                      workspace_ids="[]"
+                      deploy_items="[]"
+
+                      for f in environments/*.tfvars; do
+                        [ -e "$f" ] || continue
+                        project=$(basename "$f" .tfvars)
+                        project_key=$(echo "$project" | tr '-' '_')
+
+                        for region in $regions; do
+                          region_key=$(echo "$region" | tr '-' '_')
+                          ws_id="$project-$branch-$region"
+
+                          echo "=== $project / $branch / $region -> workspace $ws_id ==="
+
+                          body=$(jq -n \
+                            --arg id "$ws_id" --arg repo "$repo_url" --arg branch "$branch" \
+                            --arg connector "$github_connector" --arg varfile "$f" \
+                            --arg project "$project" --arg region "$region" \
+                            '{
+                              identifier: $id, name: $id, provisioner: "opentofu",
+                              provisioner_version: "latest", provider_connector: "",
+                              cost_estimation_enabled: true,
+                              repository: $repo, repository_branch: $branch,
+                              repository_connector: $connector, repository_path: "iacm",
+                              variable_sets: ["${credentials_variable_set}"],
+                              terraform_variables: {
+                                project_name:     {key: "project_name",     value: $project, value_type: "string"},
+                                region:           {key: "region",           value: $region,  value_type: "string"},
+                                environment_name: {key: "environment_name", value: $branch,  value_type: "string"}
+                              },
+                              environment_variables: {},
+                              terraform_variable_files: [
+                                {repository: $repo, repository_branch: $branch, repository_connector: $connector, repository_path: $varfile}
+                              ]
+                            }')
+
+                          status=$(curl -s -o /tmp/ws_get.json -w '%%{http_code}' \
+                            "$base/$ws_id?accountIdentifier=$account_id" \
+                            -H "x-api-key: $HARNESS_PLATFORM_API_KEY")
+
+                          if [ "$status" = "200" ]; then
+                            curl -sf -X PUT "$base/$ws_id?accountIdentifier=$account_id" \
+                              -H "x-api-key: $HARNESS_PLATFORM_API_KEY" -H "Content-Type: application/json" \
+                              -d "$body" >/dev/null
+                            echo "updated workspace $ws_id"
+                          elif [ "$status" = "404" ]; then
+                            curl -sf -X POST "$base?accountIdentifier=$account_id" \
+                              -H "x-api-key: $HARNESS_PLATFORM_API_KEY" -H "Content-Type: application/json" \
+                              -d "$body" >/dev/null
+                            echo "created workspace $ws_id"
+                          else
+                            echo "FAIL: unexpected status $status checking workspace $ws_id"
+                            cat /tmp/ws_get.json
+                            exit 1
+                          fi
+
+                          workspace_ids=$(echo "$workspace_ids" | jq --arg w "$ws_id" '. + [$w]')
+
+                          parsed=$(python3 scripts/parse_lambdas.py "$f" "$region")
+                          deploy_items=$(echo "$deploy_items" | jq \
+                            --argjson lambdas "$(echo "$parsed" | jq -c '.lambdas')" \
+                            --arg connector "$(echo "$parsed" | jq -r '.aws_connector_id')" \
+                            --arg project "$project" --arg pk "$project_key" --arg branch "$branch" \
+                            --arg region "$region" --arg rk "$region_key" --arg ws "$ws_id" '
+                            . + [ $lambdas[] | {
+                              workspace:        $ws,
+                              environment:      ($pk + "_" + $branch),
+                              infra:             ($pk + "_" + $branch + "_" + $rk),
+                              service:           (.service_identifier // ($pk + "_" + .key + "_" + $branch + "_" + $rk)),
+                              artifact_source:   (.artifact_source_identifier // ($pk + "_" + .key + "_artifact")),
+                              function_name:     (.function_name // ($project + "-" + .key + "-" + $branch)),
+                              artifact_connector: $connector,
+                              artifact_region:   $region,
+                              artifact_bucket:   .bucket,
+                              artifact_key:      .object_key
+                            } ]')
+                        done
+                      done
+
+                      export WORKSPACE_IDS=$(echo "$workspace_ids" | jq -c .)
+                      export DEPLOY_ITEMS=$(echo "$deploy_items" | jq -c .)
+                      echo "workspaces: $WORKSPACE_IDS"
+                      echo "deploy items: $DEPLOY_ITEMS"
+                    envVariables:
+                      HARNESS_PLATFORM_API_KEY: <+secrets.getValue("${harness_pat_secret}")>
+                    outputVariables:
+                      - name: WORKSPACE_IDS
+                      - name: DEPLOY_ITEMS
+        tags: {}
+
+    # -------------------------------------------------------------------
+    # 2. init/plan/apply against every workspace stage 1 touched - native
+    #    IACMTerraformPlugin steps, run once per workspace via a repeat
+    #    looping strategy over WORKSPACE_IDS.
+    # -------------------------------------------------------------------
+    - stage:
+        name: Create Lambda and Service
+        identifier: create_lambda_and_service
+        description: "Runs init/plan/apply against <+repeat.item>, one iteration per workspace Create Workspaces touched."
+        type: IACM
+        strategy:
+          repeat:
+            items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.WORKSPACE_IDS>
+            maxConcurrency: ${max_concurrency}
+        spec:
+          workspace: <+repeat.item>
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: IACMTerraformPlugin
+                  name: init
+                  identifier: init
+                  timeout: ${iacm_step_timeout}
+                  spec:
+                    command: init
+              - step:
+                  type: IACMTerraformPlugin
+                  name: plan
+                  identifier: plan
+                  timeout: ${iacm_step_timeout}
+                  spec:
+                    command: plan
+              - step:
+                  type: IACMTerraformPlugin
+                  name: apply
+                  identifier: apply
+                  timeout: ${iacm_step_timeout}
+                  spec:
+                    command: apply
+        tags: {}
+
+    # -------------------------------------------------------------------
+    # 3. Deploy every lambda with the native AwsLambdaDeploy step, against
+    #    the service/environment/infra Terraform just created for it - one
+    #    iteration per DEPLOY_ITEMS entry via a repeat looping strategy.
+    # -------------------------------------------------------------------
+    - stage:
+        name: Deploy Lambdas
+        identifier: deploy_lambdas
+        description: "Deploys <+repeat.item.function_name> with the native AWS Lambda deploy step, one iteration per lambda Create Workspaces found."
+        type: Deployment
+        strategy:
+          repeat:
+            items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.DEPLOY_ITEMS>
+            maxConcurrency: ${max_concurrency}
+        spec:
+          deploymentType: AwsLambda
+          service:
+            serviceRef: <+repeat.item.service>
+            serviceInputs:
+              serviceDefinition:
+                type: AwsLambda
+                spec:
+                  artifacts:
+                    primary:
+                      primaryArtifactRef: <+repeat.item.artifact_source>
+                      sources:
+                        - identifier: <+repeat.item.artifact_source>
+                          type: AmazonS3
+                          spec:
+                            connectorRef: <+repeat.item.artifact_connector>
+                            region: <+repeat.item.artifact_region>
+                            bucketName: <+repeat.item.artifact_bucket>
+                            filePath: <+repeat.item.artifact_key>
+          environment:
+            environmentRef: <+repeat.item.environment>
+            infrastructureDefinitions:
+              - identifier: <+repeat.item.infra>
+          execution:
+            steps:
+              - step:
+                  type: AwsLambdaDeploy
+                  name: AWS Lambda Deploy
+                  identifier: aws_lambda_deploy
+                  timeout: ${iacm_step_timeout}
+                  spec: {}
+            rollbackSteps:
+              - step:
+                  type: AwsLambdaRollback
+                  name: AWS Lambda Rollback
+                  identifier: aws_lambda_rollback
+                  timeout: ${iacm_step_timeout}
+                  spec: {}
+        failureStrategies:
+          - onFailure:
+              errors:
+                - AllErrors
+              action:
+                type: StageRollback
+        tags: {}
+
+    # -------------------------------------------------------------------
+    # 4. Prove every deployment works by invoking the function and
+    #    asserting on its response - one iteration per DEPLOY_ITEMS entry.
+    # -------------------------------------------------------------------
+    - stage:
+        name: Validate Lambdas
+        identifier: validate_lambdas
+        description: "Invokes <+repeat.item.function_name> and fails unless it responds successfully."
+        type: CI
+        strategy:
+          repeat:
+            items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.DEPLOY_ITEMS>
+            maxConcurrency: ${max_concurrency}
+        spec:
+          cloneCodebase: false
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Invoke and Assert
+                  identifier: invoke_and_assert
+                  timeout: ${iacm_step_timeout}
+                  spec:
+                    shell: Sh
+                    image: ${ci_image}
+                    command: |-
+                      set -eu
+                      apk add --no-cache aws-cli >/dev/null
+
+                      aws lambda invoke \
+                        --function-name "<+repeat.item.function_name>" \
+                        --region "<+repeat.item.artifact_region>" \
+                        --payload '{}' \
+                        --cli-binary-format raw-in-base64-out \
+                        /tmp/response.json > /tmp/invoke-meta.json
+
+                      echo "---- invocation metadata ----"
+                      cat /tmp/invoke-meta.json
+                      echo ""
+                      echo "---- response payload ----"
+                      cat /tmp/response.json
+                      echo ""
+
+                      if grep -q '"FunctionError"' /tmp/invoke-meta.json; then
+                        echo "FAIL: the function returned an error"
+                        exit 1
+                      fi
+
+                      if grep -Eq '"statusCode":[[:space:]]*200' /tmp/response.json; then
+                        echo "PASS: <+repeat.item.function_name> responded with statusCode 200"
+                      else
+                        echo "FAIL: unexpected response payload"
+                        exit 1
+                      fi
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: <+secrets.getValue("${aws_access_key_id_secret}")>
+                      AWS_SECRET_ACCESS_KEY: <+secrets.getValue("${aws_secret_access_key_secret}")>
+                      AWS_SESSION_TOKEN: <+secrets.getValue("${aws_session_token_secret}")>
+        tags: {}

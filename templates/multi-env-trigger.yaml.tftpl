@@ -1,0 +1,37 @@
+trigger:
+  name: ${trigger_name}
+  identifier: ${trigger_identifier}
+  enabled: true
+  description: "Pushes to '${branch}' that touch environments/** run ${pipeline_name} for that branch."
+  tags: {}
+  orgIdentifier: ${org_id}
+  projectIdentifier: ${project_id}
+  pipelineIdentifier: ${pipeline_id}
+  source:
+    type: Webhook
+    spec:
+      type: Github
+      spec:
+        type: Push
+        spec:
+          connectorRef: ${github_connector_id}
+          autoAbortPreviousExecutions: false
+          repoName: ${github_repo_name}
+          payloadConditions:
+            - key: targetBranch
+              operator: Equals
+              value: ${branch}
+            - key: changedFiles
+              operator: Regex
+              value: environments/.*
+          headerConditions: []
+          actions: []
+  inputYaml: |
+    pipeline:
+      properties:
+        ci:
+          codebase:
+            build:
+              type: branch
+              spec:
+                branch: <+trigger.branch>
