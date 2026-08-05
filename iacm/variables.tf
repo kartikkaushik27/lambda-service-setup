@@ -82,12 +82,14 @@ variable "lambdas" {
     environment_variables = optional(map(string), {})
 
     # Bring-your-own deployment package: this workspace deploys whatever is
-    # already at this bucket/key, the same contract modules/lambda has always
-    # had. It does not build or publish artifacts itself.
-    artifact = object({
+    # already at this lambda's bucket/key for var.region. Keyed by region,
+    # not a single bucket/key, because AWS requires a Lambda's S3 source to
+    # live in the same region as the function - a project deployed to more
+    # than one region needs the same build published to a bucket in each.
+    artifact_by_region = map(object({
       bucket = string
       key    = string
-    })
+    }))
 
     function_definition_path = optional(string)
     artifact_source_type     = optional(string, "AmazonS3")

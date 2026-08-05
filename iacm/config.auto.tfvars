@@ -38,9 +38,11 @@ lambdas = {
     publish_version        = true
     environment_variables  = {}
 
-    artifact = {
-      bucket = "lambda-service-poc-artifacts-915632791698"
-      key    = "lambda-service-poc/lambda.zip"
+    artifact_by_region = {
+      "us-east-1" = {
+        bucket = "lambda-service-poc-artifacts-915632791698"
+        key    = "lambda-service-poc/lambda.zip"
+      }
     }
 
     function_definition_path = "harness/function-definition.json"

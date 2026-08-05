@@ -38,9 +38,11 @@ lambdas = {
     publish_version        = ${publish_version}
     environment_variables  = ${environment_variables}
 
-    artifact = {
-      bucket = "${artifact_bucket}"
-      key    = "${artifact_key}"
+    artifact_by_region = {
+      "${region}" = {
+        bucket = "${artifact_bucket}"
+        key    = "${artifact_key}"
+      }
     }
 
     function_definition_path = "${function_definition_path}"
