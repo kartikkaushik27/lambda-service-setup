@@ -1,7 +1,5 @@
-# Terraform config executed by the Harness IACM workspace (see
-# iacm_workspace.tf in the repo root). This is a standalone configuration -
-# it is NOT part of the root module's state, it runs inside the pipeline's
-# IACM stage every time the pipeline is executed.
+# Standalone configuration with its own state, managed by the Harness IACM
+# workspace rather than by the root configuration.
 
 terraform {
   required_version = ">= 1.6.0"
@@ -9,11 +7,11 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 5.100"
     }
     harness = {
       source  = "harness/harness"
-      version = "~> 0.38"
+      version = "~> 0.44"
     }
   }
 }

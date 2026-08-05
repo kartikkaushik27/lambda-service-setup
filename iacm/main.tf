@@ -1,78 +1,55 @@
-# Reads whichever object the pipeline's CI stage most recently uploaded.
-# Since the S3 bucket has versioning enabled, `version_id` changes on every
-# CI upload - passing it as s3_object_version below is what makes Terraform
-# detect a code change and update the Lambda function on each pipeline run
-# (the bucket/key themselves never change).
-data "aws_s3_object" "lambda_zip" {
-  bucket = var.s3_bucket
-  key    = var.s3_key
+# ---------------------------------------------------------------------------
+# Executed by the pipeline's IACM stage on every run - this is the deployment.
+#
+# Two modules, one per half of the stage: the AWS Lambda function, and the
+# Harness service that represents it. Both are shared with the root
+# configuration through ../modules, so there is one definition of each
+# resource in the repository.
+#
+# Inputs come from config.auto.tfvars (rendered by the root configuration and
+# loaded automatically), credentials from environment variables supplied by the
+# workspace's credentials variable set. The workspace declares no variables.
+# ---------------------------------------------------------------------------
+
+module "lambda_function" {
+  source = "../modules/lambda-function"
+
+  function_name      = var.function.name
+  description        = "Deployed by Harness IACM from ${lookup(var.tags, "Repository", "OpenTofu")}"
+  execution_role_arn = var.function.execution_role_arn
+
+  runtime      = var.function.runtime
+  handler      = var.function.handler
+  timeout      = var.function.timeout
+  memory_size  = var.function.memory_size
+  architecture = var.function.architecture
+
+  environment_variables = var.function.environment_variables
+  publish_version       = var.function.publish_version
+
+  artifact_bucket = var.artifact.bucket
+  artifact_key    = var.artifact.key
 }
 
-# ---------------------------------------------------------------------------
-# "Create Lambda": the actual AWS Lambda function, created/updated directly
-# by this Terraform run (executed by the pipeline's IACM stage).
-# ---------------------------------------------------------------------------
-resource "aws_lambda_function" "this" {
-  function_name = var.function_name
-  role          = var.lambda_role_arn
-  handler       = var.handler
-  runtime       = var.runtime
-  timeout       = tonumber(var.timeout)
-  memory_size   = tonumber(var.memory_size)
+module "harness_lambda_service" {
+  source = "../modules/harness-lambda-service"
 
-  s3_bucket         = var.s3_bucket
-  s3_key            = var.s3_key
-  s3_object_version = data.aws_s3_object.lambda_zip.version_id
-}
+  service_identifier = var.harness.service_identifier
+  service_name       = var.function.name
+  org_id             = var.harness.org_id
+  project_id         = var.harness.project_id
 
-# ---------------------------------------------------------------------------
-# "Create Service": the Harness native AWS Lambda service entity, so the
-# deployment is also visible/tracked in Harness (Services page), pointing at
-# the same manifest + S3 artifact used above.
-# ---------------------------------------------------------------------------
-locals {
-  lambda_service_yaml = <<-YAML
-    service:
-      name: ${var.function_name}
-      identifier: lambda_service
-      orgIdentifier: ${var.harness_org_id}
-      projectIdentifier: ${var.harness_project_id}
-      serviceDefinition:
-        type: AwsLambda
-        spec:
-          manifests:
-            - manifest:
-                identifier: lambdaFunctionDefinition
-                type: AwsLambdaFunctionDefinition
-                spec:
-                  store:
-                    type: Github
-                    spec:
-                      connectorRef: ${var.github_connector_id}
-                      gitFetchType: Branch
-                      branch: ${var.github_branch}
-                      paths:
-                        - harness/function-definition.json
-          artifacts:
-            primary:
-              primaryArtifactRef: awslambdaartifact
-              sources:
-                - identifier: awslambdaartifact
-                  type: AmazonS3
-                  spec:
-                    connectorRef: ${var.aws_connector_id}
-                    region: ${var.aws_region}
-                    bucketName: ${var.s3_bucket}
-                    filePath: ${var.s3_key}
-  YAML
-}
+  github_connector_id      = var.harness.github_connector_id
+  github_branch            = var.harness.github_branch
+  function_definition_path = var.harness.function_definition_path
 
-resource "harness_platform_service" "this" {
-  identifier = "lambda_service"
-  name       = var.function_name
-  org_id     = var.harness_org_id
-  project_id = var.harness_project_id
-  yaml       = local.lambda_service_yaml
+  aws_connector_id           = var.harness.aws_connector_id
+  aws_region                 = var.aws_region
+  artifact_bucket            = var.artifact.bucket
+  artifact_source_identifier = var.harness.artifact_source_identifier
+  artifact_file_path         = var.artifact.service_file_path
 
-  depends_on = [aws_lambda_function.this]
+  # The service describes a function that must already exist, so that a failed
+  # function deployment never leaves a service pointing at nothing.
+  depends_on = [module.lambda_function]
 }

@@ -1,12 +1,13 @@
 provider "aws" {
   region = var.aws_region
-  # No static credentials here - the Harness IACM workspace's "aws" connector
-  # (see connector block in iacm_workspace.tf) injects short-lived AWS
-  # credentials into this run automatically.
+
+  # Credentials come from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
+  # AWS_SESSION_TOKEN, injected by the workspace's credentials variable set.
+  default_tags {
+    tags = var.tags
+  }
 }
 
-provider "harness" {
-  endpoint         = "https://app.harness.io/gateway"
-  account_id       = var.harness_account_id
-  platform_api_key = var.harness_platform_api_key
-}
+# Reads HARNESS_ACCOUNT_ID and HARNESS_PLATFORM_API_KEY from the environment,
+# also from the credentials variable set.
+provider "harness" {}

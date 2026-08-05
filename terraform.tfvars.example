@@ -1,9 +1,7 @@
-# Copy to terraform.tfvars (already gitignored) to set non-sensitive overrides,
-# OR simply keep the defaults from variables.tf.
+# Copy to terraform.tfvars (gitignored) to override the defaults in
+# variables.tf, or keep the defaults as they are.
 #
-# Sensitive values (aws_access_key_id, aws_secret_access_key, aws_session_token,
-# harness_platform_api_key, github_token) must NOT be placed here. Export them
-# as TF_VAR_* environment variables instead, e.g.:
+# Credentials must NOT go here. Export them as TF_VAR_* environment variables:
 #
 #   export TF_VAR_aws_access_key_id="..."
 #   export TF_VAR_aws_secret_access_key="..."
@@ -11,6 +9,15 @@
 #   export TF_VAR_harness_platform_api_key="..."
 #   export TF_VAR_github_token="..."
 
+# --- Stack identity -------------------------------------------------------
+environment = "dev"
+owner       = "platform-engineering"
+
+additional_tags = {
+  CostCenter = "engineering"
+}
+
+# --- Lambda ---------------------------------------------------------------
 aws_region = "us-east-1"
 
 function_name                = "lambda-service-poc"
@@ -18,13 +25,37 @@ runtime                      = "nodejs20.x"
 handler                      = "index.handler"
 memory_size                  = 128
 timeout                      = 10
+lambda_architecture          = "x86_64"
+lambda_publish_version       = true
 lambda_environment_variables = {}
 
+# Extra managed policies for the execution role, e.g. DynamoDB or SQS access.
+lambda_additional_policy_arns = []
+
+log_retention_days = 30
+
+# --- Artifact storage -----------------------------------------------------
+artifact_retention_days = 90
+
+# Leave false outside throwaway environments: true lets `tofu destroy` delete
+# the bucket together with every deployment package in it.
+artifact_bucket_force_destroy = false
+
+# --- Harness --------------------------------------------------------------
 harness_account_id   = "aBh2PBI0T1CYMmA6iQFosg"
 harness_org_id       = "default"
 harness_project_id   = "lambda_service_poc"
 harness_project_name = "Lambda Service POC"
 
+# --- Pipeline and IACM workspace -----------------------------------------
+ci_image     = "alpine:3.19"
+step_timeout = "10m"
+
+# "latest" tracks whichever version Harness ships. Pin an exact version once
+# you have confirmed it is available to your account.
+provisioner_version = "latest"
+
+# --- GitHub ---------------------------------------------------------------
 github_owner     = "kartikkaushik27"
 github_repo_name = "lambda-service-setup"
 github_branch    = "main"

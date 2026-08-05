@@ -1,164 +1,230 @@
-# lambda-service-setup
+# AWS Lambda delivery with OpenTofu and Harness
 
-OpenTofu configuration that provisions a **one-time** foundation plus a
-self-contained **3-stage Harness pipeline** that does everything else:
+Provisions an AWS Lambda function and delivers it through a Harness pipeline
+that builds the package, applies OpenTofu to deploy it, and then proves the
+deployment works by invoking the function.
 
-```
-CI (Build Artifact)  ->  IACM (Create Lambda and Service)  ->  CI (Test)
-zip lambda-src/,          runs Terraform (iacm/*.tf) that        invokes the
-upload to S3               creates the real aws_lambda_function   deployed function
-                            + the Harness native AWS Lambda        and fails the
-                            service, in one apply                  pipeline if the
-                                                                    response isn't
-                                                                    healthy
-```
+Everything - AWS infrastructure, the Harness project, connectors, secrets, the
+IACM workspace, the pipeline, and the service - is defined as code in this
+repository.
 
-All three stages run on **Harness Cloud** (hosted runners) - no delegate is
-required to run the pipeline.
-
-## One-time setup (local `tofu apply`)
-
-A small amount of infrastructure rarely changes, so it's provisioned once by
-local OpenTofu rather than by the pipeline:
-
-- An **IAM execution role** for the Lambda function (`aws.tf`)
-- An **S3 bucket** that the CI stage uploads deployment packages into (`aws.tf`)
-- The **GitHub repository**, Harness **project**, **secrets**, **connectors**,
-  the **IACM workspace** definition, and the **pipeline** itself
-
-Everything else - the actual `aws_lambda_function` and the Harness `Service`
-entity - is created every time the pipeline runs, by the pipeline's IACM
-stage (see [Architecture](#architecture) below).
-
-## Architecture
+## Pipeline
 
 ```
-lambda-src/index.js              -> zipped by the CI stage and uploaded to S3
-harness/function-definition.json -> Lambda "CreateFunction" manifest, read by
-                                     the Harness Service via a GitHub connector
-iacm/*.tf                        -> Terraform run by the pipeline's IACM stage:
-                                     creates aws_lambda_function + the Harness
-                                     "lambda_service" service
-*.tf (repo root)                 -> one-time setup: GitHub repo, AWS IAM
-                                     role/S3 bucket, and every Harness
-                                     resource below
+ ┌─────────────────┐  ┌──────────────────────────┐  ┌──────────────────┐  ┌───────────────────┐
+ │ Build Artifact  │  │ Create Lambda and Service│  │ Deploy with      │  │ Verify Deployment │
+ │      (CI)       │─▶│          (IACM)          │─▶│ Harness          │─▶│       (CI)        │
+ │                 │  │                          │  │ (Deployment)     │  │                   │
+ │ zip lambda-src/ │  │ tofu init / plan / apply  │  │ AwsLambdaDeploy  │  │ invoke function,  │
+ │ publish to S3   │  │ → aws_lambda_function     │  │ through the      │  │ assert on the     │
+ │ export build key│  │ → harness_platform_service│  │ managed service  │  │ response          │
+ └─────────────────┘  └──────────────────────────┘  └──────────────────┘  └───────────────────┘
 ```
 
-Harness resources created (org `default`, project `lambda_service_poc`):
+Stages 1, 2 and 4 run on Harness Cloud. Stage 3 is a Deployment stage, so it
+runs on a **delegate** - one must be healthy for the pipeline to pass.
 
-- Secrets: `aws_access_key_id`, `aws_secret_access_key`, `aws_session_token`, `github_pat`, `harness_platform_pat`
-- Connectors: `aws_lambda_connector` (AWS, manual/session-token auth), `github_connector`
-- IACM Workspace: `lambda_iacm_workspace` (OpenTofu, points at `iacm/` in this repo)
-- Pipeline: `deploy_lambda_pipeline` ("Lambda CI-IACM-Test Pipeline"), 3 stages:
-  1. `build_artifact` (CI) - zips `lambda-src/` and uploads it to S3
-  2. `create_lambda_and_service` (IACM) - `init` / `plan` / `apply` against the workspace above
-  3. `test_lambda_deployment` (CI) - `aws lambda invoke` + asserts `statusCode: 200`
-- Service `lambda_service` (type `AwsLambda`) - created/updated by the IACM
-  stage's Terraform run (`iacm/main.tf`), not by local `tofu apply`
+The two deployment stages are deliberate, not redundant: stage 2 provisions the
+function as infrastructure, and stage 3 releases a specific build through
+Harness so the deployment is tracked, attributable and rollback-capable.
 
-## Variables
+### How a build reaches the deploy stage
 
-See [`variables.tf`](variables.tf) for the full list and defaults. The ones
-you're most likely to change:
+The service does not hard-code which package it deploys. Its artifact
+`filePath` is left as a runtime input, and the pipeline supplies it:
 
-| Variable | Default | Purpose |
+1. Stage 1 publishes the package to an immutable per-build key,
+   `<function>/builds/<build number>.zip`, and exports that key as the step
+   output variable `ARTIFACT_KEY`. It also copies it to the stable key that
+   stage 2's OpenTofu reads.
+2. Stage 3 passes that output into the service's runtime input as
+   `serviceInputs`, so the release names the exact package this run built:
+
+```yaml
+filePath: <+pipeline.stages.build_artifact.spec.execution.steps.package_and_publish.output.outputVariables.ARTIFACT_KEY>
+```
+
+Set `service_artifact_file_path` to a literal key instead of `"<+input>"` to
+pin the service to one package.
+
+## Who owns what
+
+The split is deliberate: **the root configuration owns scaffolding, the
+pipeline owns deployments.**
+
+| | Root configuration (`tofu apply`, occasional) | `iacm/` (pipeline, every run) |
 |---|---|---|
-| `function_name` | `lambda-service-poc` | Lambda function name; also seeds the IAM role and S3 bucket names |
-| `runtime` | `nodejs20.x` | Lambda runtime |
-| `handler` | `index.handler` | Lambda handler |
-| `memory_size` | `128` | MB |
-| `timeout` | `10` | seconds |
-| `lambda_environment_variables` | `{}` | Lambda env vars |
-| `aws_region` | `us-east-1` | Region for IAM/S3/Lambda |
-| `harness_org_id` / `harness_project_id` | `default` / `lambda_service_poc` | Where Harness resources live |
-| `github_owner` / `github_repo_name` / `github_branch` | `kartikkaushik27` / `lambda-service-setup` / `main` | Where this repo/manifest lives |
+| AWS | IAM execution role, artifact bucket, log group | the Lambda function |
+| Harness | project, secrets, connectors, environment, infrastructure, IACM workspace, pipeline | the AwsLambda service |
 
-Sensitive inputs (never put these in a committed file - export as `TF_VAR_*`):
+Nothing about a deployment requires a local apply. Conversely, nothing
+long-lived is re-provisioned on every build.
 
-- `aws_access_key_id`, `aws_secret_access_key`, `aws_session_token` - AWS STS session credentials
-- `harness_platform_api_key` - Harness Personal Access Token (also stored as the `harness_platform_pat` Harness secret, for the IACM stage's own `harness` provider)
-- `github_token` - GitHub Personal Access Token
+## Layout
+
+```
+.
+├── main.tf                 wires the modules together
+├── variables.tf            single source of truth for every input
+├── locals.tf               naming and tagging
+├── generated.tf            files rendered into the repo (see below)
+├── moved.tf                state moves from the pre-module layout
+├── outputs.tf
+├── providers.tf            AWS / Harness / GitHub providers, default tags
+├── versions.tf
+├── backend.tf.example      remote state, for when local state stops being enough
+│
+├── modules/
+│   ├── lambda-foundation/       IAM role, artifact bucket, log group
+│   ├── lambda-function/         the aws_lambda_function
+│   ├── harness-lambda-service/  the Harness AwsLambda service
+│   ├── harness-project/         project, secrets, connectors
+│   ├── harness-lambda-environment/ environment + AwsLambda infrastructure
+│   ├── harness-iacm-workspace/  workspace + credentials variable set
+│   └── harness-lambda-pipeline/ the four-stage delivery pipeline
+│
+├── iacm/                   the deployment, run by the IACM stage
+│   ├── main.tf             calls ../modules/lambda-function and
+│   │                       ../modules/harness-lambda-service
+│   ├── variables.tf        five grouped inputs, no credentials
+│   ├── moved.tf            state moves for the workspace's own state
+│   └── config.auto.tfvars  GENERATED - do not edit
+│
+├── lambda-src/             function source, packaged by the CI stage
+├── harness/                GENERATED function definition manifest
+└── templates/              templates for the generated files
+```
+
+The two modules under `iacm/` are the same modules the root configuration
+would use, so each resource is defined exactly once in the repository.
+
+## Why the IACM workspace has no variables
+
+The workspace previously carried sixteen `terraform_variable` blocks and three
+environment variables. It now carries none, through two changes:
+
+**Credentials live in a Harness variable set** and are injected as environment
+variables that both providers read natively - `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` for AWS and `HARNESS_ACCOUNT_ID`,
+`HARNESS_PLATFORM_API_KEY` for Harness. The configuration in `iacm/` therefore
+declares no credential variables and cannot leak one into a plan file. Rotating
+a credential means updating one Harness secret; adding a second workspace means
+attaching the same variable set.
+
+Note that the workspace `connector` block does not work for this: it forwards
+only the AWS key pair and drops the session token, which fails with
+short-lived STS credentials.
+
+**Non-secret inputs are generated into `iacm/config.auto.tfvars`** by the root
+apply and committed. OpenTofu loads `*.auto.tfvars` automatically from its
+working directory, so the values arrive without any workspace configuration -
+defined once in the root `variables.tf`, and visible as a diff in a pull
+request rather than as a field in a UI.
+
+What is left in `iacm/variables.tf` is five inputs, grouped into objects
+(`function`, `artifact`, `harness`, plus `aws_region` and `tags`) so adding a
+setting does not mean adding another loose variable.
+
+## Generated files
+
+Both are committed, because the pipeline reads them from the repository:
+
+| File | Rendered from | Consumed by |
+|---|---|---|
+| `harness/function-definition.json` | `templates/function-definition.json.tftpl` | the Harness service manifest |
+| `iacm/config.auto.tfvars` | `templates/config.auto.tfvars.tftpl` | the IACM stage's OpenTofu run |
+
+Do not edit them by hand - the next root apply overwrites them. Change
+`variables.tf` instead.
 
 ## Usage
 
+### One-time setup
+
 ```bash
-# 1. Export sensitive credentials (see creds.txt locally - never commit it)
 export TF_VAR_aws_access_key_id="..."
 export TF_VAR_aws_secret_access_key="..."
 export TF_VAR_aws_session_token="..."
-export TF_VAR_harness_platform_api_key="..."
 export TF_VAR_github_token="..."
+export TF_VAR_harness_platform_api_key="..."
 
-# 2. Provision the one-time foundation (see "One-time setup" above)
 tofu init
-tofu plan
 tofu apply
-
-# 3. Push this repo's code (including iacm/) into the GitHub repo tofu just
-#    created - the CI stage clones it, and the IACM workspace fetches iacm/
-#    from it on every pipeline run.
-git init
-git remote add origin https://github.com/<github_owner>/<github_repo_name>.git
-git add .
-git commit -m "Initial OpenTofu + Harness Lambda pipeline setup"
-git push -u origin main
-
-# 4. Run the pipeline in Harness (see the harness_pipeline_url output from
-#    `tofu apply`). Since the CI codebase build is a runtime input, trigger
-#    it with a branch, e.g. via the API:
-#      pipeline:
-#        identifier: deploy_lambda_pipeline
-#        properties:
-#          ci:
-#            codebase:
-#              build:
-#                type: branch
-#                spec:
-#                  branch: main
 ```
 
-## Function definition manifest
+Then commit and push, so the pipeline can read the repository:
 
-`harness/function-definition.json` is generated by OpenTofu (see
-[`templates/function-definition.json.tftpl`](templates/function-definition.json.tftpl))
-and must be pushed to git any time you change `function_name`, `runtime`,
-`handler`, `memory_size`, or `timeout`. Two important rules from Harness's
-AWS Lambda deployment type:
+```bash
+git add -A && git commit -m "Provision Lambda delivery stack" && git push
+```
 
-- Every field in the function definition must be **camelCase**
-  (`functionName`, `runtime`, `handler`, `role`, `timeout`, `memorySize`) -
-  not the PascalCase used by the raw AWS `CreateFunction` API.
-- Do **not** include a `code`/`S3Bucket`/`S3Key` block - Harness injects the
-  deployment package automatically from the service's primary S3 artifact
-  source at deploy time.
+### Deploying
 
-## The `iacm/` Terraform config
+Run the pipeline - the URL is in the `harness_pipeline_url` output. Each run
+packages the current `lambda-src/`, applies `iacm/`, and verifies the result.
 
-This is a **standalone** Terraform configuration - it is not a module of the
-root config and has its own state, managed entirely by Harness IACM. The
-pipeline's IACM stage runs `init` / `plan` / `apply` against it on every
-execution:
+Changing the function's runtime, memory, timeout or environment variables is a
+change to the root `variables.tf` followed by `tofu apply` (which re-renders
+`iacm/config.auto.tfvars`), a commit, and a pipeline run.
 
-- `data.aws_s3_object.lambda_zip` reads whichever object the CI stage most
-  recently uploaded. Because the S3 bucket has **versioning enabled**, its
-  `version_id` changes on every CI upload; passing that as
-  `s3_object_version` is what makes Terraform detect a code change and
-  update the Lambda function on each run (bucket/key never change).
-- `aws_lambda_function.this` - the actual Lambda function ("Create Lambda").
-- `harness_platform_service.this` - the Harness native `AwsLambda` service
-  entity ("Create Service"), so the deployment stays visible in Harness too.
+## Production considerations
 
-AWS credentials are injected as plain environment variables
-(`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`) on the
-`harness_platform_workspace` resource rather than via the workspace's
-built-in `connector` block - that block only forwards a static access
-key/secret pair and drops the session token, which breaks STS-based
-credentials like ours.
+Already handled:
 
-## Known limitation
+- **Secrets** never appear in configuration or state input: they arrive as
+  `TF_VAR_*` at the root and as environment variables inside IACM runs.
+- **Tagging** is applied through the provider's `default_tags`, so every
+  resource is tagged in both the root and IACM configurations.
+- **Artifact history**: bucket versioning is enabled and superseded packages
+  expire on a schedule, so any earlier build stays deployable.
+- **Log retention** is declared rather than left at Lambda's unbounded default.
+- **Immutable function versions** are published on each code change.
+- **Encryption and access**: the artifact bucket is encrypted (SSE-S3) with
+  public access fully blocked, and `force_destroy` defaults to off.
+- **Input validation** on runtime, memory, timeout, retention and durations
+  fails fast at plan time rather than mid-apply at the AWS API.
+- **Version pinning**: providers are pinned to a minor series and
+  `.terraform.lock.hcl` is committed.
+- **Verification**: a deployment is not considered successful until the
+  function has been invoked and its response asserted on.
+- **Traceable releases**: each build is published under an immutable key and
+  deployed by name through Harness, with `AwsLambdaRollback` configured as the
+  stage's rollback step.
+- **Cost estimation** is enabled on the IACM workspace, so a plan shows the
+  cost impact of the change alongside it.
 
-The AWS credentials used here are a **temporary STS session token**. Both
-`tofu apply` and the pipeline's CI/IACM stages will fail once that token
-expires (typically within a day). For anything beyond a POC, switch to
-IAM-role or OIDC-based authentication instead of manual access-key/session-
-token credentials.
+Worth doing before real production use:
+
+- **Remote state** for the root configuration - see `backend.tf.example`.
+  (`iacm/` state is already remote: the IACM workspace owns it.)
+- **Long-lived credentials**: this stack uses short-lived STS credentials that
+  expire, which is why they are re-exported for each apply. In a permanent
+  setup, use an IAM role assumed by a Harness AWS connector with OIDC instead
+  of storing keys as secrets.
+- **Approval before apply** in the IACM stage, so a plan is reviewed before it
+  reaches production.
+- **Pin `provisioner_version`** once you have confirmed which OpenTofu
+  versions your Harness account offers.
+- **Least-privilege IAM**: the execution role gets `AWSLambdaBasicExecutionRole`
+  and nothing else; add what the function actually needs through
+  `lambda_additional_policy_arns`.
+
+## Inputs
+
+See `variables.tf` for the full list with descriptions, and
+`terraform.tfvars.example` for a populated starting point. Each module also
+documents its own interface in `modules/<name>/README.md`.
+
+## Outputs
+
+| Output | Description |
+|---|---|
+| `harness_pipeline_url` | Link to the pipeline |
+| `github_repository_url` | Repository holding this configuration |
+| `lambda_execution_role_arn` | Role the function runs as |
+| `artifact_bucket` / `artifact_key` | Where packages are published |
+| `log_group_name` | Log group for the function |
+| `harness_project_id` | Harness project |
+| `harness_environment_id` / `harness_infrastructure_id` | Target of the native deploy stage |
+| `iacm_workspace_id` | Workspace the provisioning stage runs |
+| `iacm_credentials_variable_set_id` | Variable set reusable by other workspaces |

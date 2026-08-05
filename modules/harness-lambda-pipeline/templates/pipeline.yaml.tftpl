@@ -1,0 +1,261 @@
+pipeline:
+  name: ${pipeline_name}
+  identifier: ${pipeline_identifier}
+  projectIdentifier: ${project_id}
+  orgIdentifier: ${org_id}
+  description: "Builds the Lambda deployment package, provisions the function and its Harness service with OpenTofu, then verifies the deployment."
+  tags: {}
+  properties:
+    ci:
+      codebase:
+        connectorRef: ${github_connector_id}
+        repoName: ${github_repo_name}
+        build: <+input>
+  variables:
+    - name: function_name
+      type: String
+      description: Lambda function the pipeline builds, deploys and verifies.
+      value: ${function_name}
+    - name: artifact_bucket
+      type: String
+      description: S3 bucket the deployment package is published to.
+      value: ${artifact_bucket}
+    - name: artifact_key
+      type: String
+      description: S3 key of the deployment package.
+      value: ${artifact_key}
+    - name: aws_region
+      type: String
+      description: Region the function and bucket live in.
+      value: ${aws_region}
+  stages:
+    # -----------------------------------------------------------------------
+    # 1. Package the function source and publish it to S3, twice:
+    #
+    #    - an immutable per-build key, which the deploy stage passes to the
+    #      service as a runtime input, so a deployment names exactly the
+    #      package it deploys;
+    #    - a stable key, which the OpenTofu in iacm/ reads. The bucket is
+    #      versioned, so that key still carries full history.
+    #
+    #    The build key is exported as a step output variable, which is how the
+    #    later stages find out what this build produced.
+    # -----------------------------------------------------------------------
+    - stage:
+        name: Build Artifact
+        identifier: build_artifact
+        description: "Packages lambda-src/ and publishes it to the artifact bucket."
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Package and Publish
+                  identifier: package_and_publish
+                  timeout: ${step_timeout}
+                  spec:
+                    shell: Sh
+                    image: ${ci_image}
+                    command: |-
+                      set -eu
+                      apk add --no-cache zip aws-cli >/dev/null
+
+                      cd lambda-src
+                      zip -r -q ../lambda.zip .
+                      cd ..
+
+                      bucket="<+pipeline.variables.artifact_bucket>"
+                      region="<+pipeline.variables.aws_region>"
+                      build_key="${artifact_build_prefix}/<+pipeline.sequenceId>.zip"
+                      stable_key="<+pipeline.variables.artifact_key>"
+
+                      aws s3 cp lambda.zip "s3://$bucket/$build_key" \
+                        --region "$region" \
+                        --metadata "build=<+pipeline.sequenceId>,commit=<+codebase.commitSha>"
+
+                      aws s3 cp "s3://$bucket/$build_key" "s3://$bucket/$stable_key" \
+                        --region "$region"
+
+                      export ARTIFACT_KEY="$build_key"
+                      echo "Published build <+pipeline.sequenceId> to s3://$bucket/$build_key"
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: <+secrets.getValue("${aws_access_key_id_secret}")>
+                      AWS_SECRET_ACCESS_KEY: <+secrets.getValue("${aws_secret_access_key_secret}")>
+                      AWS_SESSION_TOKEN: <+secrets.getValue("${aws_session_token_secret}")>
+                    outputVariables:
+                      - name: ARTIFACT_KEY
+        tags: {}
+
+    # -----------------------------------------------------------------------
+    # 2. Run the OpenTofu in iacm/, which creates or updates both the Lambda
+    #    function and the Harness service that represents it. The plan is
+    #    retained on the execution, so every deployment has a reviewable diff.
+    # -----------------------------------------------------------------------
+    - stage:
+        name: Create Lambda and Service
+        identifier: create_lambda_and_service
+        description: "Provisions the AWS Lambda function and the Harness AwsLambda service via OpenTofu."
+        type: IACM
+        spec:
+          workspace: ${workspace_id}
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: IACMTerraformPlugin
+                  name: init
+                  identifier: init
+                  timeout: ${step_timeout}
+                  spec:
+                    command: init
+              - step:
+                  type: IACMTerraformPlugin
+                  name: plan
+                  identifier: plan
+                  timeout: ${step_timeout}
+                  spec:
+                    command: plan
+              - step:
+                  type: IACMTerraformPlugin
+                  name: apply
+                  identifier: apply
+                  timeout: ${step_timeout}
+                  spec:
+                    command: apply
+        tags: {}
+
+    # -----------------------------------------------------------------------
+    # 3. Deploy through Harness itself, using the native AwsLambdaDeploy step
+    #    against the service the IACM stage just reconciled.
+    #
+    #    The service leaves its artifact filePath as a runtime input, and this
+    #    stage supplies the per-build key exported by stage 1 - so the
+    #    deployment names the exact package this run produced, and Harness
+    #    tracks the release with rollback available.
+    #
+    #    Unlike the other stages, this one runs on a delegate.
+    # -----------------------------------------------------------------------
+    - stage:
+        name: Deploy with Harness
+        identifier: deploy_lambda
+        description: "Deploys the function with the native AWS Lambda deploy step, through the OpenTofu-managed service."
+        type: Deployment
+        spec:
+          deploymentType: AwsLambda
+          service:
+            serviceRef: ${service_id}
+            serviceInputs:
+              serviceDefinition:
+                type: AwsLambda
+                spec:
+                  artifacts:
+                    primary:
+                      primaryArtifactRef: ${artifact_source_id}
+                      sources:
+                        - identifier: ${artifact_source_id}
+                          type: AmazonS3
+                          spec:
+                            filePath: <+pipeline.stages.build_artifact.spec.execution.steps.package_and_publish.output.outputVariables.ARTIFACT_KEY>
+          environment:
+            environmentRef: ${environment_id}
+            infrastructureDefinitions:
+              - identifier: ${infrastructure_id}
+          execution:
+            steps:
+              - step:
+                  type: AwsLambdaDeploy
+                  name: AWS Lambda Deploy
+                  identifier: aws_lambda_deploy
+                  timeout: ${step_timeout}
+                  spec: {}
+            rollbackSteps:
+              - step:
+                  type: AwsLambdaRollback
+                  name: AWS Lambda Rollback
+                  identifier: aws_lambda_rollback
+                  timeout: ${step_timeout}
+                  spec: {}
+        failureStrategies:
+          - onFailure:
+              errors:
+                - AllErrors
+              action:
+                type: StageRollback
+        tags: {}
+
+    # -----------------------------------------------------------------------
+    # 4. Prove the deployment actually works by invoking the function and
+    #    asserting on its response, so a green pipeline means a live function.
+    # -----------------------------------------------------------------------
+    - stage:
+        name: Verify Deployment
+        identifier: test_lambda_deployment
+        description: "Invokes the deployed function and fails the pipeline unless it responds successfully."
+        type: CI
+        spec:
+          cloneCodebase: false
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Invoke and Assert
+                  identifier: invoke_and_assert
+                  timeout: ${step_timeout}
+                  spec:
+                    shell: Sh
+                    image: ${ci_image}
+                    command: |-
+                      set -eu
+                      apk add --no-cache aws-cli >/dev/null
+
+                      aws lambda invoke \
+                        --function-name "<+pipeline.variables.function_name>" \
+                        --region <+pipeline.variables.aws_region> \
+                        --payload '{}' \
+                        --cli-binary-format raw-in-base64-out \
+                        /tmp/response.json > /tmp/invoke-meta.json
+
+                      echo "---- invocation metadata ----"
+                      cat /tmp/invoke-meta.json
+                      echo ""
+                      echo "---- response payload ----"
+                      cat /tmp/response.json
+                      echo ""
+
+                      # A function that raises still returns HTTP 200 with a
+                      # FunctionError field, so check that before the payload.
+                      if grep -q '"FunctionError"' /tmp/invoke-meta.json; then
+                        echo "FAIL: the function returned an error"
+                        exit 1
+                      fi
+
+                      if grep -Eq '"statusCode":[[:space:]]*200' /tmp/response.json; then
+                        echo "PASS: the function responded with statusCode 200"
+                      else
+                        echo "FAIL: unexpected response payload"
+                        exit 1
+                      fi
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: <+secrets.getValue("${aws_access_key_id_secret}")>
+                      AWS_SECRET_ACCESS_KEY: <+secrets.getValue("${aws_secret_access_key_secret}")>
+                      AWS_SESSION_TOKEN: <+secrets.getValue("${aws_session_token_secret}")>
+        tags: {}
