@@ -199,5 +199,11 @@ resource "harness_platform_workspace" "this" {
     value_type = "string"
   }
 
+  terraform_variable {
+    key        = "manage_infrastructure"
+    value      = "false"
+    value_type = "string"
+  }
+
   depends_on = [local_file.project_tfvars]
 }

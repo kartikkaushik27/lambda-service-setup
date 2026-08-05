@@ -43,10 +43,24 @@ variable "environment_name" {
 # The original project's environment/infrastructure definitions are created
 # by the root config instead (see harness.tf), since its pipeline's native
 # AwsLambdaDeploy stage needs their identifiers at root-apply time, before
-# this workspace exists. Every self-service project leaves this at the
-# default so its own workspace is fully self-contained.
+# this workspace exists. Its workspace sets both flags below to false so its
+# own run creates neither.
+#
+# Every self-service project needs the two flags to differ, though: the
+# environment is shared by every region a (project, environment_name) is
+# deployed to, but each region is a separate workspace with a separate
+# Terraform state, so only one workspace may create the shared environment
+# (manage_environment=true, set on exactly one region by the multi-env
+# pipeline) while every region - including that one - always creates its own
+# infrastructure definition (manage_infrastructure stays at its default).
 variable "manage_environment" {
-  description = "Whether this workspace creates its own Harness environment/infrastructure definition."
+  description = "Whether this workspace creates the Harness environment shared by every region of this (project, environment_name)."
+  type        = bool
+  default     = true
+}
+
+variable "manage_infrastructure" {
+  description = "Whether this workspace creates its own (region-specific) Harness infrastructure definition."
   type        = bool
   default     = true
 }

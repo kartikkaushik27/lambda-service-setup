@@ -19,11 +19,11 @@ output "harness_service_ids" {
 }
 
 output "harness_environment_id" {
-  description = "Environment created for this (project, environment, region), if this workspace manages its own."
-  value       = var.manage_environment ? module.environment[0].environment_id : null
+  description = "Environment shared by every region this (project, environment_name) deploys to. Always the same identifier whether or not this workspace created it."
+  value       = "${local.project_key}_${var.environment_name}"
 }
 
 output "harness_infrastructure_id" {
-  description = "Infrastructure definition created for this (project, environment, region), if this workspace manages its own."
-  value       = var.manage_environment ? module.environment[0].infrastructure_id : null
+  description = "Infrastructure definition created for this (project, environment_name, region), if this workspace manages its own."
+  value       = var.manage_infrastructure ? harness_platform_infrastructure.this[0].identifier : null
 }

@@ -167,6 +167,16 @@ pipeline:
 
                         project_key=$(echo "$project" | tr '-' '_')
 
+                        # The Harness environment is shared by every region this
+                        # project/branch deploys to, but each region is a
+                        # separate workspace with a separate Terraform state -
+                        # only the first region below may create it (Create
+                        # Lambda and Service runs with maxConcurrency 1, in
+                        # $regions order, so it always finishes owning the
+                        # environment before any other region starts). Every
+                        # region always creates its own infrastructure
+                        # definition (iacm/main.tf manage_infrastructure default).
+                        is_first_region=true
                         for region in $regions; do
                           region_key=$(echo "$region" | tr '-' '_')
                           ws_id="$project-$branch-$region"
@@ -177,6 +187,7 @@ pipeline:
                             --arg id "$ws_id" --arg repo "$repo_url" --arg branch "$branch" \
                             --arg connector "$github_connector" --arg varfile "$f" \
                             --arg project "$project" --arg region "$region" \
+                            --arg manage_env "$is_first_region" \
                             '{
                               identifier: $id, name: $id, provisioner: "opentofu",
                               provisioner_version: "latest", provider_connector: "",
@@ -185,15 +196,17 @@ pipeline:
                               repository_connector: $connector, repository_path: "iacm",
                               variable_sets: ["${credentials_variable_set}"],
                               terraform_variables: {
-                                project_name:     {key: "project_name",     value: $project, value_type: "string"},
-                                region:           {key: "region",           value: $region,  value_type: "string"},
-                                environment_name: {key: "environment_name", value: $branch,  value_type: "string"}
+                                project_name:      {key: "project_name",      value: $project,   value_type: "string"},
+                                region:            {key: "region",            value: $region,    value_type: "string"},
+                                environment_name:  {key: "environment_name",  value: $branch,    value_type: "string"},
+                                manage_environment: {key: "manage_environment", value: $manage_env, value_type: "string"}
                               },
                               environment_variables: {},
                               terraform_variable_files: [
                                 {repository: $repo, repository_branch: $branch, repository_connector: $connector, repository_path: $varfile}
                               ]
                             }')
+                          is_first_region=false
 
                           status=$(curl -s -o /tmp/ws_get.json -w '%%{http_code}' \
                             "$base/$ws_id?accountIdentifier=$account_id" \
@@ -261,12 +274,12 @@ pipeline:
     - stage:
         name: Create Lambda and Service
         identifier: create_lambda_and_service
-        description: "Runs init/plan/apply against <+repeat.item>, one iteration per workspace Create Workspaces touched."
+        description: "Runs init/plan/apply against <+repeat.item>, one iteration per workspace Create Workspaces touched. Sequential (maxConcurrency 1): the first region's workspace for each project owns the shared Harness environment, so it must finish before any other region's workspace runs."
         type: IACM
         strategy:
           repeat:
             items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.WORKSPACE_IDS.split(",")>
-            maxConcurrency: ${max_concurrency}
+            maxConcurrency: ${iacm_max_concurrency}
         spec:
           workspace: <+repeat.item>
           platform:

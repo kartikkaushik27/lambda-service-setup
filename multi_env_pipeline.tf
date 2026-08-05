@@ -35,6 +35,7 @@ resource "harness_platform_pipeline" "multi_env" {
     workspace_step_timeout = var.multi_env_workspace_step_timeout
     iacm_step_timeout      = var.multi_env_iacm_step_timeout
     max_concurrency        = var.multi_env_max_concurrency
+    iacm_max_concurrency   = var.multi_env_iacm_max_concurrency
 
     aws_access_key_id_secret     = harness_platform_secret_text.aws_access_key_id.identifier
     aws_secret_access_key_secret = harness_platform_secret_text.aws_secret_access_key.identifier

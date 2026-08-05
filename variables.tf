@@ -238,9 +238,15 @@ variable "multi_env_iacm_step_timeout" {
 }
 
 variable "multi_env_max_concurrency" {
-  description = "How many workspaces/deployments the looping strategies run in parallel. Keep modest - each iteration is a full IACM apply or Lambda deploy."
+  description = "How many deploys/validations the looping strategies run in parallel in the Deploy Lambdas and Validate Lambdas stages. Keep modest - each iteration is a full Lambda deploy."
   type        = number
   default     = 3
+}
+
+variable "multi_env_iacm_max_concurrency" {
+  description = "How many IACM workspace applies the Create Lambda and Service stage runs in parallel. Must stay 1: the first region processed for each project creates the Harness environment every other region's workspace references, so regions cannot run concurrently."
+  type        = number
+  default     = 1
 }
 
 # ---------------------------------------------------------------------------
