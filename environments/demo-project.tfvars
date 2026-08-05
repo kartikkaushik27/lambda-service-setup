@@ -41,6 +41,10 @@ lambdas = {
         bucket = "lambda-service-poc-artifacts-915632791698"
         key    = "demo-project/api/lambda.zip"
       }
+      "us-west-1" = {
+        bucket = "lambda-service-poc-artifacts-915632791698-us-west-1"
+        key    = "demo-project/api/lambda.zip"
+      }
     }
 
     # Paired manifest committed at harness/demo-project/api/function-definition.json
