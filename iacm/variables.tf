@@ -2,9 +2,9 @@
 # into objects so the interface stays small and a new setting is added in one
 # place rather than as another loose variable.
 #
-# There is deliberately no credential variable here: the AWS and Harness
-# providers read theirs from the environment, so a credential can never end up
-# in a plan file.
+# There is deliberately no credential variable: the AWS and Harness providers
+# read theirs from the environment, so a credential can never end up in a plan
+# file.
 
 variable "aws_region" {
   description = "Region the function and artifact bucket live in."
@@ -28,27 +28,25 @@ variable "function" {
 }
 
 variable "artifact" {
-  description = "Location of the deployment package published by the CI stage. service_file_path is what the Harness service deploys - \"<+input>\" leaves it a runtime input the pipeline supplies per execution."
+  description = "Deployment package the function is built from. Only the function needs this - the Harness service takes its artifact location as runtime inputs instead."
 
   type = object({
-    bucket            = string
-    key               = string
-    service_file_path = optional(string, "<+input>")
+    bucket = string
+    key    = string
   })
 }
 
 variable "harness" {
-  description = "Harness scope, connectors and identifiers the service entity is built from."
+  description = "Harness scope, existing connectors, and identifiers the service is built from."
 
   type = object({
     org_id                     = string
     project_id                 = string
-    aws_connector_id           = string
     github_connector_id        = string
     github_branch              = string
     function_definition_path   = optional(string, "harness/function-definition.json")
     service_identifier         = optional(string, "lambda_service")
-    artifact_source_identifier = optional(string, "awslambdaartifact")
+    artifact_source_identifier = optional(string, "lambda_artifact")
   })
 }
 

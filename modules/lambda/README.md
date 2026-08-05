@@ -1,4 +1,4 @@
-# lambda-function
+# lambda
 
 Creates or updates the AWS Lambda function itself from a deployment package
 already sitting in S3.
@@ -9,8 +9,8 @@ stage on every execution - it is the "Create Lambda" half of that stage.
 ## Usage
 
 ```hcl
-module "lambda_function" {
-  source = "../modules/lambda-function"
+module "lambda" {
+  source = "../modules/lambda"
 
   function_name      = "my-function"
   execution_role_arn = "arn:aws:iam::123456789012:role/my-function-exec-role"

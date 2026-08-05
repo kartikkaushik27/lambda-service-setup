@@ -3,7 +3,7 @@ pipeline:
   identifier: ${pipeline_identifier}
   projectIdentifier: ${project_id}
   orgIdentifier: ${org_id}
-  description: "Builds the Lambda deployment package, provisions the function and its Harness service with OpenTofu, then verifies the deployment."
+  description: "Builds the Lambda deployment package, provisions the function and its Harness service with OpenTofu, deploys it through Harness, then verifies it."
   tags: {}
   properties:
     ci:
@@ -22,29 +22,32 @@ pipeline:
       value: ${artifact_bucket}
     - name: artifact_key
       type: String
-      description: S3 key of the deployment package.
+      description: Stable S3 key the OpenTofu run deploys from.
       value: ${artifact_key}
     - name: aws_region
       type: String
       description: Region the function and bucket live in.
       value: ${aws_region}
+    - name: aws_connector
+      type: String
+      description: Connector the service reads the artifact through.
+      value: ${aws_connector_id}
   stages:
     # -----------------------------------------------------------------------
-    # 1. Package the function source and publish it to S3, twice:
+    # 1. Package the function source and publish it, twice:
     #
-    #    - an immutable per-build key, which the deploy stage passes to the
-    #      service as a runtime input, so a deployment names exactly the
-    #      package it deploys;
+    #    - an immutable per-build key, which the deploy stage hands to the
+    #      service, so a release names exactly the package it deploys;
     #    - a stable key, which the OpenTofu in iacm/ reads. The bucket is
     #      versioned, so that key still carries full history.
     #
-    #    The build key is exported as a step output variable, which is how the
-    #    later stages find out what this build produced.
+    #    The location is then exported as step output variables. Those are the
+    #    only thing the service knows about the artifact - see stage 3.
     # -----------------------------------------------------------------------
     - stage:
         name: Build Artifact
         identifier: build_artifact
-        description: "Packages lambda-src/ and publishes it to the artifact bucket."
+        description: "Packages lambda-src/ and publishes it, exporting where it landed."
         type: CI
         spec:
           cloneCodebase: true
@@ -84,19 +87,28 @@ pipeline:
                       aws s3 cp "s3://$bucket/$build_key" "s3://$bucket/$stable_key" \
                         --region "$region"
 
+                      # Where the artifact ended up. The service takes these as
+                      # runtime inputs rather than storing them, so publishing
+                      # to somewhere other than S3 means changing this step,
+                      # not the service.
+                      export ARTIFACT_BUCKET="$bucket"
                       export ARTIFACT_KEY="$build_key"
+                      export ARTIFACT_REGION="$region"
+
                       echo "Published build <+pipeline.sequenceId> to s3://$bucket/$build_key"
                     envVariables:
                       AWS_ACCESS_KEY_ID: <+secrets.getValue("${aws_access_key_id_secret}")>
                       AWS_SECRET_ACCESS_KEY: <+secrets.getValue("${aws_secret_access_key_secret}")>
                       AWS_SESSION_TOKEN: <+secrets.getValue("${aws_session_token_secret}")>
                     outputVariables:
+                      - name: ARTIFACT_BUCKET
                       - name: ARTIFACT_KEY
+                      - name: ARTIFACT_REGION
         tags: {}
 
     # -----------------------------------------------------------------------
-    # 2. Run the OpenTofu in iacm/, which creates or updates both the Lambda
-    #    function and the Harness service that represents it. The plan is
+    # 2. Run the OpenTofu in iacm/: two modules, one creating the Lambda
+    #    function and one creating the Harness service for it. The plan is
     #    retained on the execution, so every deployment has a reviewable diff.
     # -----------------------------------------------------------------------
     - stage:
@@ -138,13 +150,13 @@ pipeline:
         tags: {}
 
     # -----------------------------------------------------------------------
-    # 3. Deploy through Harness itself, using the native AwsLambdaDeploy step
-    #    against the service the IACM stage just reconciled.
+    # 3. Deploy through Harness with the native AwsLambdaDeploy step, against
+    #    the service the previous stage reconciled.
     #
-    #    The service leaves its artifact filePath as a runtime input, and this
-    #    stage supplies the per-build key exported by stage 1 - so the
-    #    deployment names the exact package this run produced, and Harness
-    #    tracks the release with rollback available.
+    #    The service stores nothing about where its artifact lives - connector,
+    #    region, bucket and path are all runtime inputs, filled in here from
+    #    stage 1's outputs. That is what keeps the service independent of the
+    #    artifact store.
     #
     #    Unlike the other stages, this one runs on a delegate.
     # -----------------------------------------------------------------------
@@ -168,6 +180,9 @@ pipeline:
                         - identifier: ${artifact_source_id}
                           type: AmazonS3
                           spec:
+                            connectorRef: <+pipeline.variables.aws_connector>
+                            region: <+pipeline.stages.build_artifact.spec.execution.steps.package_and_publish.output.outputVariables.ARTIFACT_REGION>
+                            bucketName: <+pipeline.stages.build_artifact.spec.execution.steps.package_and_publish.output.outputVariables.ARTIFACT_BUCKET>
                             filePath: <+pipeline.stages.build_artifact.spec.execution.steps.package_and_publish.output.outputVariables.ARTIFACT_KEY>
           environment:
             environmentRef: ${environment_id}
@@ -197,8 +212,8 @@ pipeline:
         tags: {}
 
     # -----------------------------------------------------------------------
-    # 4. Prove the deployment actually works by invoking the function and
-    #    asserting on its response, so a green pipeline means a live function.
+    # 4. Prove the deployment works by invoking the function and asserting on
+    #    its response, so a green pipeline means a live function.
     # -----------------------------------------------------------------------
     - stage:
         name: Verify Deployment

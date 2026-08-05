@@ -1,17 +1,64 @@
-# ---------------------------------------------------------------------------
-# This file is the single source of truth for every input in the stack.
+# The single source of truth for every input.
 #
-# Values consumed by the OpenTofu that runs inside the pipeline's IACM stage
-# are rendered from here into iacm/config.auto.tfvars (see generated.tf), so
-# there is exactly one place to change a setting and one diff to review.
+# Values used by the OpenTofu that runs inside the pipeline are rendered from
+# here into iacm/config.auto.tfvars, so there is one place to change a setting
+# and one diff to review.
+
 # ---------------------------------------------------------------------------
+# Existing Harness resources.
+#
+# These are platform plumbing owned outside this stack - the project and the
+# connectors are expected to exist already, and are referenced by identifier.
+# ---------------------------------------------------------------------------
+
+variable "harness_account_id" {
+  description = "Harness account identifier."
+  type        = string
+  default     = "aBh2PBI0T1CYMmA6iQFosg"
+}
+
+variable "harness_org_id" {
+  description = "Harness organization holding the project."
+  type        = string
+  default     = "default"
+}
+
+variable "harness_project_id" {
+  description = "Existing Harness project this stack is created in."
+  type        = string
+  default     = "lambda_service_poc"
+}
+
+variable "aws_connector_id" {
+  description = "Existing Harness AWS connector. Used by the infrastructure definition and as the connector the service reads its artifact through."
+  type        = string
+  default     = "aws_lambda_connector"
+}
+
+variable "github_connector_id" {
+  description = "Existing Harness GitHub connector. Used to clone the codebase, fetch the function definition manifest, and check out the IACM workspace."
+  type        = string
+  default     = "github_connector"
+}
+
+variable "harness_environment_type" {
+  description = "Whether the Harness environment is treated as production."
+  type        = string
+  default     = "PreProduction"
+}
+
+variable "harness_platform_api_key" {
+  description = "Harness API key. Supply via TF_VAR_harness_platform_api_key."
+  type        = string
+  sensitive   = true
+}
 
 # ---------------------------------------------------------------------------
 # Stack identity
 # ---------------------------------------------------------------------------
 
 variable "environment" {
-  description = "Environment this stack represents. Applied as a tag and used in resource descriptions."
+  description = "Environment this stack represents. Names the Harness environment and is applied as a tag."
   type        = string
   default     = "dev"
 
@@ -139,58 +186,6 @@ variable "aws_session_token" {
   description = "AWS session token (short-lived STS credentials). Supply via TF_VAR_aws_session_token."
   type        = string
   sensitive   = true
-}
-
-# ---------------------------------------------------------------------------
-# Harness platform
-# ---------------------------------------------------------------------------
-
-variable "harness_endpoint" {
-  description = "Harness API endpoint. Change this for a self-managed or non-default cluster."
-  type        = string
-  default     = "https://app.harness.io/gateway"
-}
-
-variable "harness_account_id" {
-  description = "Harness account identifier."
-  type        = string
-  default     = "aBh2PBI0T1CYMmA6iQFosg"
-}
-
-variable "harness_platform_api_key" {
-  description = "Harness API key. Supply via TF_VAR_harness_platform_api_key."
-  type        = string
-  sensitive   = true
-}
-
-variable "harness_org_id" {
-  description = "Harness organization to create the project under."
-  type        = string
-  default     = "default"
-}
-
-variable "harness_project_id" {
-  description = "Identifier of the Harness project."
-  type        = string
-  default     = "lambda_service_poc"
-}
-
-variable "harness_project_name" {
-  description = "Display name of the Harness project."
-  type        = string
-  default     = "Lambda Service POC"
-}
-
-variable "harness_environment_type" {
-  description = "Whether the Harness environment is treated as production."
-  type        = string
-  default     = "PreProduction"
-}
-
-variable "service_artifact_file_path" {
-  description = "S3 key the Harness service deploys. \"<+input>\" makes it a runtime input, so the deploy stage supplies the package its CI stage just built. Set a literal key to pin the service to one package instead."
-  type        = string
-  default     = "<+input>"
 }
 
 # ---------------------------------------------------------------------------

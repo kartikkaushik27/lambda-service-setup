@@ -1,20 +1,51 @@
 # ---------------------------------------------------------------------------
-# Root configuration.
+# This configuration owns the scaffolding: AWS infrastructure the function
+# needs (aws.tf), Harness platform wiring for delivery (harness.tf), and the
+# pipeline (pipeline.tf).
 #
-# Applied by hand (or from a bootstrap pipeline) and responsible only for
-# long-lived scaffolding: the AWS foundation the function needs, the Harness
-# project it is delivered from, and the pipeline that does the delivering.
+# It does NOT create the Lambda function or the Harness service. Those are the
+# two modules under modules/, applied by the pipeline's IACM stage from iacm/,
+# so a deployment is a pipeline execution rather than someone's local apply.
 #
-# The function itself and its Harness service are deliberately NOT here - they
-# are provisioned on every pipeline run by the OpenTofu in iacm/, so a
-# deployment is a pipeline execution rather than someone's local apply.
+# The Harness project and the AWS/GitHub connectors are assumed to exist -
+# they are referenced by identifier from variables.tf.
 # ---------------------------------------------------------------------------
 
-data "aws_caller_identity" "current" {}
+locals {
+  # Applied to every AWS resource via the provider's default_tags, and passed
+  # to the IACM configuration so pipeline-created resources match.
+  common_tags = merge(
+    {
+      Application = var.function_name
+      Environment = var.environment
+      Owner       = var.owner
+      ManagedBy   = "OpenTofu"
+      Repository  = "${var.github_owner}/${var.github_repo_name}"
+    },
+    var.additional_tags,
+  )
+
+  artifact_bucket_name = "${var.function_name}-artifacts-${data.aws_caller_identity.current.account_id}"
+
+  # Stable key the OpenTofu run deploys the function from. The bucket is
+  # versioned, so this single key still carries the history of every build.
+  artifact_key = "${var.function_name}/lambda.zip"
+
+  # Immutable per-build packages, as <build number>.zip. The deploy stage hands
+  # one of these to the service by name.
+  artifact_build_prefix = "${var.function_name}/builds"
+
+  # The service is created by the IACM stage, but the pipeline references it,
+  # so the identifiers are fixed here and shared with iacm/ through the
+  # generated tfvars below.
+  service_identifier         = "lambda_service"
+  artifact_source_identifier = "lambda_artifact"
+
+  function_definition_path = "harness/function-definition.json"
+}
 
 # Repository holding this configuration, the function source, and the OpenTofu
-# the pipeline runs. Created empty (auto_init = false) so pushing the local
-# working copy becomes the initial commit.
+# the pipeline runs.
 resource "github_repository" "this" {
   name        = var.github_repo_name
   description = "OpenTofu-managed AWS Lambda function + Harness native AWS Lambda service/pipeline setup"
@@ -27,129 +58,66 @@ resource "github_repository" "this" {
 }
 
 # ---------------------------------------------------------------------------
-# AWS foundation: execution role, artifact bucket, log group.
+# Files rendered into the repository and committed alongside it. Both are read
+# by the pipeline, so generating them keeps variables.tf the only place a value
+# is defined, and any change to them is a reviewable diff.
 # ---------------------------------------------------------------------------
 
-module "lambda_foundation" {
-  source = "./modules/lambda-foundation"
+# The function definition manifest the native deploy step applies.
+#
+# Every field must be camelCase (functionName, memorySize, ...) and the
+# manifest must not carry a code/S3Bucket/S3Key block - Harness injects the
+# package from the service's artifact source.
+#
+# The tags matter beyond housekeeping: Harness reconciles the function's tags
+# to this manifest and untags anything missing from it, so omitting them would
+# have the deploy stage strip the tags the OpenTofu run just applied.
+resource "local_file" "lambda_function_definition" {
+  filename        = "${path.module}/${local.function_definition_path}"
+  file_permission = "0644"
 
-  function_name        = var.function_name
-  artifact_bucket_name = local.artifact_bucket_name
-
-  artifact_bucket_force_destroy = var.artifact_bucket_force_destroy
-  artifact_retention_days       = var.artifact_retention_days
-  log_retention_days            = var.log_retention_days
-  additional_policy_arns        = var.lambda_additional_policy_arns
+  content = templatefile("${path.module}/templates/function-definition.json.tftpl", {
+    function_name = var.function_name
+    runtime       = var.runtime
+    handler       = var.handler
+    role_arn      = aws_iam_role.lambda_exec.arn
+    timeout       = var.timeout
+    memory_size   = var.memory_size
+    tags          = jsonencode(local.common_tags)
+  })
 }
 
-# ---------------------------------------------------------------------------
-# Harness project: secrets and connectors everything else authenticates with.
-# ---------------------------------------------------------------------------
+# Non-secret inputs for the OpenTofu the IACM stage runs. Named *.auto.tfvars
+# so OpenTofu loads it automatically from iacm/, which is what lets the
+# workspace itself declare no variables at all.
+resource "local_file" "iacm_config" {
+  filename        = "${path.module}/iacm/config.auto.tfvars"
+  file_permission = "0644"
 
-module "harness_project" {
-  source = "./modules/harness-project"
+  content = templatefile("${path.module}/templates/config.auto.tfvars.tftpl", {
+    aws_region = var.aws_region
 
-  org_id       = var.harness_org_id
-  project_id   = var.harness_project_id
-  project_name = var.harness_project_name
-  project_tags = ["purpose:lambda-poc", "environment:${var.environment}"]
+    function_name         = var.function_name
+    runtime               = var.runtime
+    handler               = var.handler
+    timeout               = var.timeout
+    memory_size           = var.memory_size
+    architecture          = var.lambda_architecture
+    publish_version       = var.lambda_publish_version
+    execution_role_arn    = aws_iam_role.lambda_exec.arn
+    environment_variables = jsonencode(var.lambda_environment_variables)
 
-  aws_region       = var.aws_region
-  github_owner     = var.github_owner
-  github_repo_name = var.github_repo_name
+    artifact_bucket = aws_s3_bucket.artifacts.id
+    artifact_key    = local.artifact_key
 
-  aws_access_key_id        = var.aws_access_key_id
-  aws_secret_access_key    = var.aws_secret_access_key
-  aws_session_token        = var.aws_session_token
-  github_token             = var.github_token
-  harness_platform_api_key = var.harness_platform_api_key
+    harness_org_id             = var.harness_org_id
+    harness_project_id         = var.harness_project_id
+    github_connector_id        = var.github_connector_id
+    github_branch              = var.github_branch
+    function_definition_path   = local.function_definition_path
+    service_identifier         = local.service_identifier
+    artifact_source_identifier = local.artifact_source_identifier
 
-  depends_on = [github_repository.this]
-}
-
-# ---------------------------------------------------------------------------
-# Deployment target for the native AWS Lambda deploy step.
-# ---------------------------------------------------------------------------
-
-module "harness_lambda_environment" {
-  source = "./modules/harness-lambda-environment"
-
-  org_id     = var.harness_org_id
-  project_id = module.harness_project.project_id
-
-  environment_identifier = var.environment
-  environment_name       = var.environment
-  environment_type       = var.harness_environment_type
-
-  aws_connector_id = module.harness_project.aws_connector_id
-  aws_region       = var.aws_region
-}
-
-# ---------------------------------------------------------------------------
-# IACM workspace the provisioning stage runs, plus the credentials variable
-# set it authenticates with.
-# ---------------------------------------------------------------------------
-
-module "harness_iacm_workspace" {
-  source = "./modules/harness-iacm-workspace"
-
-  identifier = "lambda_iacm_workspace"
-  name       = "Lambda IACM Workspace"
-  org_id     = var.harness_org_id
-  project_id = module.harness_project.project_id
-
-  provisioner_version     = var.provisioner_version
-  cost_estimation_enabled = var.cost_estimation_enabled
-
-  repository           = "https://github.com/${var.github_owner}/${var.github_repo_name}"
-  repository_branch    = var.github_branch
-  repository_path      = "iacm"
-  repository_connector = module.harness_project.github_connector_id
-
-  harness_account_id = var.harness_account_id
-  aws_region         = var.aws_region
-
-  credential_secret_ids = {
-    aws_access_key_id        = module.harness_project.secret_ids.aws_access_key_id
-    aws_secret_access_key    = module.harness_project.secret_ids.aws_secret_access_key
-    aws_session_token        = module.harness_project.secret_ids.aws_session_token
-    harness_platform_api_key = module.harness_project.secret_ids.harness_pat
-  }
-}
-
-# ---------------------------------------------------------------------------
-# Delivery pipeline: build -> provision -> verify.
-# ---------------------------------------------------------------------------
-
-module "harness_lambda_pipeline" {
-  source = "./modules/harness-lambda-pipeline"
-
-  org_id     = var.harness_org_id
-  project_id = module.harness_project.project_id
-
-  github_connector_id = module.harness_project.github_connector_id
-  github_repo_name    = var.github_repo_name
-  workspace_id        = module.harness_iacm_workspace.workspace_id
-
-  function_name         = var.function_name
-  artifact_bucket       = module.lambda_foundation.artifact_bucket
-  artifact_key          = local.artifact_key
-  artifact_build_prefix = local.artifact_build_prefix
-  aws_region            = var.aws_region
-
-  # The service is created by the IACM stage; the deploy stage references it
-  # by identifier and supplies its runtime input.
-  service_id         = local.service_identifier
-  artifact_source_id = local.artifact_source_identifier
-  environment_id     = module.harness_lambda_environment.environment_id
-  infrastructure_id  = module.harness_lambda_environment.infrastructure_id
-
-  ci_image     = var.ci_image
-  step_timeout = var.step_timeout
-
-  credential_secret_ids = {
-    aws_access_key_id     = module.harness_project.secret_ids.aws_access_key_id
-    aws_secret_access_key = module.harness_project.secret_ids.aws_secret_access_key
-    aws_session_token     = module.harness_project.secret_ids.aws_session_token
-  }
+    tags = local.common_tags
+  })
 }

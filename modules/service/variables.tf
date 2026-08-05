@@ -20,7 +20,7 @@ variable "project_id" {
 }
 
 variable "github_connector_id" {
-  description = "Harness GitHub connector used to fetch the function definition manifest."
+  description = "Existing Harness GitHub connector used to fetch the function definition manifest."
   type        = string
 }
 
@@ -35,29 +35,14 @@ variable "function_definition_path" {
   default     = "harness/function-definition.json"
 }
 
-variable "aws_connector_id" {
-  description = "Harness AWS connector used to read the deployment package from S3."
-  type        = string
-}
-
-variable "aws_region" {
-  description = "Region the artifact bucket lives in."
-  type        = string
-}
-
-variable "artifact_bucket" {
-  description = "S3 bucket holding the deployment package."
-  type        = string
-}
-
 variable "artifact_source_identifier" {
-  description = "Identifier of the primary artifact source. The pipeline must use the same value when supplying service inputs."
+  description = "Identifier of the primary artifact source. The pipeline uses the same value when supplying its runtime inputs."
   type        = string
-  default     = "awslambdaartifact"
+  default     = "lambda_artifact"
 }
 
-variable "artifact_file_path" {
-  description = "S3 key the service deploys. Keep the default \"<+input>\" to make it a runtime input the pipeline supplies at deploy time, or set a literal key to pin the service to one package."
+variable "artifact_source_type" {
+  description = "Kind of artifact store the package is pulled from, e.g. AmazonS3, ArtifactoryRegistry, DockerRegistry. Its location is supplied per execution as runtime inputs, so only the type is fixed here."
   type        = string
-  default     = "<+input>"
+  default     = "AmazonS3"
 }

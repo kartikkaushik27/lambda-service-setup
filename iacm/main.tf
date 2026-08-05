@@ -1,18 +1,15 @@
-# ---------------------------------------------------------------------------
 # Executed by the pipeline's IACM stage on every run - this is the deployment.
 #
-# Two modules, one per half of the stage: the AWS Lambda function, and the
-# Harness service that represents it. Both are shared with the root
-# configuration through ../modules, so there is one definition of each
-# resource in the repository.
+# Two modules: one creates the Lambda function, one creates the Harness service
+# for it.
 #
-# Inputs come from config.auto.tfvars (rendered by the root configuration and
-# loaded automatically), credentials from environment variables supplied by the
-# workspace's credentials variable set. The workspace declares no variables.
-# ---------------------------------------------------------------------------
+# Inputs come from config.auto.tfvars, which the root configuration renders and
+# OpenTofu loads automatically. Credentials come from environment variables
+# supplied by the workspace's credentials variable set, so the workspace itself
+# declares no variables.
 
-module "lambda_function" {
-  source = "../modules/lambda-function"
+module "lambda" {
+  source = "../modules/lambda"
 
   function_name      = var.function.name
   description        = "Deployed by Harness IACM from ${lookup(var.tags, "Repository", "OpenTofu")}"
@@ -31,8 +28,8 @@ module "lambda_function" {
   artifact_key    = var.artifact.key
 }
 
-module "harness_lambda_service" {
-  source = "../modules/harness-lambda-service"
+module "service" {
+  source = "../modules/service"
 
   service_identifier = var.harness.service_identifier
   service_name       = var.function.name
@@ -43,13 +40,9 @@ module "harness_lambda_service" {
   github_branch            = var.harness.github_branch
   function_definition_path = var.harness.function_definition_path
 
-  aws_connector_id           = var.harness.aws_connector_id
-  aws_region                 = var.aws_region
-  artifact_bucket            = var.artifact.bucket
   artifact_source_identifier = var.harness.artifact_source_identifier
-  artifact_file_path         = var.artifact.service_file_path
 
-  # The service describes a function that must already exist, so that a failed
+  # The service describes a function that must already exist, so a failed
   # function deployment never leaves a service pointing at nothing.
-  depends_on = [module.lambda_function]
+  depends_on = [module.lambda]
 }
