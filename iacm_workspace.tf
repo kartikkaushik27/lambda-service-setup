@@ -16,11 +16,25 @@ resource "harness_platform_workspace" "lambda" {
   repository_path      = "iacm"
   repository_connector = harness_platform_connector_github.this.identifier
 
-  # AWS credentials for the "aws" provider inside iacm/ are injected
-  # automatically by this connector - no static keys needed in iacm/*.tf.
-  connector {
-    type          = "aws"
-    connector_ref = harness_platform_connector_aws.this.identifier
+  # NOTE: the workspace `connector` block (type = "aws") only injects a
+  # static AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY pair - it drops the
+  # session token, so it can't be used with our STS-based connector. Instead
+  # we inject all three as plain environment variables, which the "aws"
+  # provider in iacm/providers.tf picks up directly.
+  environment_variable {
+    key        = "AWS_ACCESS_KEY_ID"
+    value      = harness_platform_secret_text.aws_access_key_id.identifier
+    value_type = "secret"
+  }
+  environment_variable {
+    key        = "AWS_SECRET_ACCESS_KEY"
+    value      = harness_platform_secret_text.aws_secret_access_key.identifier
+    value_type = "secret"
+  }
+  environment_variable {
+    key        = "AWS_SESSION_TOKEN"
+    value      = harness_platform_secret_text.aws_session_token.identifier
+    value_type = "secret"
   }
 
   terraform_variable {
