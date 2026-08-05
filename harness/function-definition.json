@@ -1,14 +1,14 @@
 {
-  "FunctionName": "<+serviceVariables.function_name>",
-  "Runtime": "<+serviceVariables.runtime>",
-  "Role": "<+serviceVariables.lambda_role_arn>",
-  "Handler": "<+serviceVariables.handler>",
+  "FunctionName": "lambda-service-poc",
+  "Runtime": "nodejs20.x",
+  "Role": "arn:aws:iam::915632791698:role/lambda-service-poc-exec-role",
+  "Handler": "index.handler",
   "Code": {
     "S3Bucket": "<+artifact.bucketName>",
     "S3Key": "<+artifact.key>"
   },
   "Description": "Sample Lambda managed via OpenTofu + Harness native AWS Lambda deployment",
-  "Timeout": <+serviceVariables.timeout>,
-  "MemorySize": <+serviceVariables.memory_size>,
+  "Timeout": 10,
+  "MemorySize": 128,
   "Publish": true
 }
