@@ -174,7 +174,11 @@ Already handled:
 - **Secrets** never appear in configuration or state input: they arrive as
   `TF_VAR_*` at the root and as environment variables inside IACM runs.
 - **Tagging** is applied through the provider's `default_tags`, so every
-  resource is tagged in both the root and IACM configurations.
+  resource is tagged in both the root and IACM configurations. The same tags
+  are rendered into the function definition manifest, because Harness
+  reconciles the function's tags to that manifest and untags anything missing
+  from it - without them the deploy stage would strip the tags the provisioning
+  stage had just applied.
 - **Artifact history**: bucket versioning is enabled and superseded packages
   expire on a schedule, so any earlier build stays deployable.
 - **Log retention** is declared rather than left at Lambda's unbounded default.
