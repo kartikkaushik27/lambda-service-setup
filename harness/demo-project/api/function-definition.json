@@ -1,9 +1,9 @@
 {
-  "functionName": "demo-project-api-dev",
+  "functionName": "<+repeat.item.split(\"~\")[4]>",
   "runtime": "nodejs20.x",
   "handler": "index.handler",
   "role": "arn:aws:iam::915632791698:role/demo-project-api-exec-role",
   "timeout": 10,
   "memorySize": 128,
-  "tags": {"Application":"demo-project-api","Environment":"dev","ManagedBy":"OpenTofu","Owner":"platform-engineering"}
+  "tags": {"Application":"demo-project-api","ManagedBy":"OpenTofu","Owner":"platform-engineering"}
 }
