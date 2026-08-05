@@ -8,7 +8,7 @@ resource "harness_platform_connector_aws" "this" {
     access_key_ref    = harness_platform_secret_text.aws_access_key_id.identifier
     secret_key_ref    = harness_platform_secret_text.aws_secret_access_key.identifier
     session_token_ref = harness_platform_secret_text.aws_session_token.identifier
-    region             = var.aws_region
+    region            = var.aws_region
   }
 }
 

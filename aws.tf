@@ -25,8 +25,14 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
 }
 
 # ---------------------------------------------------------------------------
-# S3 bucket that stores the Lambda deployment package. Harness's native
-# AWS Lambda service pulls the artifact from here (Amazon S3 artifact source).
+# S3 bucket that stores the Lambda deployment package. This is a one-time
+# piece of infrastructure created directly by local `tofu apply` (NOT by the
+# pipeline) - the bucket itself rarely changes, so there's no need to
+# re-provision it on every pipeline run.
+#
+# The pipeline's CI stage uploads a fresh lambda.zip into this bucket on
+# every run, and the IACM stage's Terraform run reads that object to create
+# the actual aws_lambda_function.
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "lambda_artifacts" {
@@ -47,17 +53,4 @@ resource "aws_s3_bucket_public_access_block" "lambda_artifacts" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
-}
-
-data "archive_file" "lambda_zip" {
-  type        = "zip"
-  source_dir  = "${path.module}/lambda-src"
-  output_path = "${path.module}/.build/lambda.zip"
-}
-
-resource "aws_s3_object" "lambda_package" {
-  bucket = aws_s3_bucket.lambda_artifacts.id
-  key    = "${var.function_name}/lambda.zip"
-  source = data.archive_file.lambda_zip.output_path
-  etag   = data.archive_file.lambda_zip.output_md5
 }

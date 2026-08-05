@@ -14,8 +14,8 @@ output "lambda_artifact_bucket" {
 }
 
 output "lambda_artifact_key" {
-  description = "S3 key of the uploaded Lambda deployment package."
-  value       = aws_s3_object.lambda_package.key
+  description = "S3 key the CI stage uploads the Lambda deployment package to (and the IACM stage reads it from)."
+  value       = local.lambda_artifact_key
 }
 
 output "harness_pipeline_url" {
