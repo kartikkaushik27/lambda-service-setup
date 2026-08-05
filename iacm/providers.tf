@@ -1,5 +1,5 @@
 provider "aws" {
-  region = var.aws_region
+  region = var.region
 
   # Credentials come from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
   # AWS_SESSION_TOKEN, injected by the workspace's credentials variable set.

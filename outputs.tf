@@ -15,12 +15,12 @@ output "artifact_key" {
 
 output "harness_environment_id" {
   description = "Environment the native deploy stage targets."
-  value       = harness_platform_environment.this.identifier
+  value       = module.environment.environment_id
 }
 
 output "harness_infrastructure_id" {
   description = "Infrastructure definition the native deploy stage targets."
-  value       = harness_platform_infrastructure.this.identifier
+  value       = module.environment.infrastructure_id
 }
 
 output "harness_workspace_id" {

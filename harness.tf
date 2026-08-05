@@ -69,41 +69,26 @@ resource "harness_platform_secret_text" "harness_pat" {
 # ---------------------------------------------------------------------------
 # Deployment target for the native AWS Lambda deploy step. A Deployment stage
 # cannot run without an environment and an infrastructure definition.
+#
+# This is the same module iacm/main.tf uses for every self-service project's
+# own (environment, region) deployment targets - see modules/environment.
 # ---------------------------------------------------------------------------
 
-resource "harness_platform_environment" "this" {
-  identifier = var.environment
-  name       = var.environment
+module "environment" {
+  source = "./modules/environment"
+
   org_id     = var.harness_org_id
   project_id = var.harness_project_id
-  type       = var.harness_environment_type
-}
 
-resource "harness_platform_infrastructure" "this" {
-  identifier      = "lambda_infra"
-  name            = "lambda-infra"
-  org_id          = var.harness_org_id
-  project_id      = var.harness_project_id
-  env_id          = harness_platform_environment.this.identifier
-  type            = "AwsLambda"
-  deployment_type = "AwsLambda"
+  environment_identifier = var.environment
+  environment_name       = var.environment
+  environment_type       = var.harness_environment_type
 
-  yaml = yamlencode({
-    infrastructureDefinition = {
-      name              = "lambda-infra"
-      identifier        = "lambda_infra"
-      orgIdentifier     = var.harness_org_id
-      projectIdentifier = var.harness_project_id
-      environmentRef    = harness_platform_environment.this.identifier
-      deploymentType    = "AwsLambda"
-      type              = "AwsLambda"
-      spec = {
-        connectorRef = var.aws_connector_id
-        region       = var.aws_region
-      }
-      allowSimultaneousDeployments = false
-    }
-  })
+  infra_identifier = "lambda_infra"
+  infra_name       = "lambda-infra"
+
+  aws_connector_id = var.aws_connector_id
+  aws_region       = var.aws_region
 }
 
 # ---------------------------------------------------------------------------

@@ -32,8 +32,8 @@ resource "harness_platform_pipeline" "this" {
     service_id         = local.service_identifier
     artifact_source_id = local.artifact_source_identifier
 
-    environment_id    = harness_platform_environment.this.identifier
-    infrastructure_id = harness_platform_infrastructure.this.identifier
+    environment_id    = module.environment.environment_id
+    infrastructure_id = module.environment.infrastructure_id
 
     ci_image     = var.ci_image
     step_timeout = var.step_timeout

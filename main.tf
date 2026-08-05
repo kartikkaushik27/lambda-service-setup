@@ -37,9 +37,17 @@ locals {
 
   # The service is created by the IACM stage, but the pipeline references it,
   # so the identifiers are fixed here and shared with iacm/ through the
-  # generated tfvars below.
+  # generated tfvars below. Pinned rather than derived from project_name, so
+  # the multi-lambda schema migration in iacm/ didn't rename or recreate
+  # anything already live.
   service_identifier         = "lambda_service"
   artifact_source_identifier = "lambda_artifact"
+  lambda_key                 = "lambda_service"
+
+  # Identifies this project in the shared iacm/ configuration. Only used here
+  # to satisfy that configuration's schema - every other identifier for this
+  # project is pinned above instead of derived from it.
+  project_name = "lambda-service-poc"
 
   function_definition_path = "harness/function-definition.json"
 }
@@ -95,9 +103,11 @@ resource "local_file" "iacm_config" {
   file_permission = "0644"
 
   content = templatefile("${path.module}/templates/config.auto.tfvars.tftpl", {
-    aws_region = var.aws_region
+    project_name     = local.project_name
+    region           = var.aws_region
+    environment_name = var.environment
+    lambda_key       = local.lambda_key
 
-    function_name         = var.function_name
     runtime               = var.runtime
     handler               = var.handler
     timeout               = var.timeout
@@ -114,7 +124,9 @@ resource "local_file" "iacm_config" {
     harness_project_id         = var.harness_project_id
     github_connector_id        = var.github_connector_id
     github_branch              = var.github_branch
+    aws_connector_id           = var.aws_connector_id
     function_definition_path   = local.function_definition_path
+    function_name              = var.function_name
     service_identifier         = local.service_identifier
     artifact_source_identifier = local.artifact_source_identifier
 
