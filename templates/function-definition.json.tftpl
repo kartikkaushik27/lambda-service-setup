@@ -1,14 +1,8 @@
 {
-  "FunctionName": "${function_name}",
-  "Runtime": "${runtime}",
-  "Role": "${role_arn}",
-  "Handler": "${handler}",
-  "Code": {
-    "S3Bucket": "<+artifact.bucketName>",
-    "S3Key": "<+artifact.key>"
-  },
-  "Description": "Sample Lambda managed via OpenTofu + Harness native AWS Lambda deployment",
-  "Timeout": ${timeout},
-  "MemorySize": ${memory_size},
-  "Publish": true
+  "functionName": "${function_name}",
+  "runtime": "${runtime}",
+  "handler": "${handler}",
+  "role": "${role_arn}",
+  "timeout": ${timeout},
+  "memorySize": ${memory_size}
 }

@@ -5,12 +5,11 @@
 # templates/function-definition.json.tftpl below); the deployment package
 # (zip) is pulled from the S3 bucket provisioned in aws.tf.
 #
-# NOTE: only Code.S3Bucket/S3Key use Harness's `<+artifact...>` expressions -
-# that's the one part of the manifest Harness is documented to resolve at
-# deploy time. Everything else (function name, runtime, role, handler, size,
-# timeout) is rendered as a literal value from the current variables.tf
-# values, since expression resolution for other fields inside a
-# Git-sourced AwsLambdaFunctionDefinition manifest isn't guaranteed.
+# NOTE: every field in a Harness AwsLambdaFunctionDefinition manifest must be
+# camelCase (functionName, runtime, handler, role, timeout, memorySize) -
+# Harness injects the deployment package (from the service's primary S3
+# artifact source) automatically; do NOT add a code/S3Bucket/S3Key block.
+# Values here are rendered as literals from the current variables.tf values.
 # Whenever you change those variables, re-run `tofu apply` and push the
 # regenerated harness/function-definition.json to git.
 
