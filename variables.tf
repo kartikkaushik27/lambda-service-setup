@@ -217,6 +217,28 @@ variable "provisioner_version" {
 }
 
 # ---------------------------------------------------------------------------
+# Self-service environment pipeline (environment_pipeline.tf)
+# ---------------------------------------------------------------------------
+
+variable "environment_pipeline_provision_timeout" {
+  description = "Timeout for the step that provisions every workspace Create Workspaces touched, in Harness duration format. Needs headroom for N workspaces run one after another."
+  type        = string
+  default     = "45m"
+}
+
+variable "environment_pipeline_poll_interval_seconds" {
+  description = "How often the environment pipeline polls a workspace's provisioning run for completion."
+  type        = number
+  default     = 15
+}
+
+variable "environment_pipeline_poll_attempts" {
+  description = "How many times the environment pipeline polls before giving up on a single workspace's provisioning run."
+  type        = number
+  default     = 80
+}
+
+# ---------------------------------------------------------------------------
 # GitHub
 # ---------------------------------------------------------------------------
 
