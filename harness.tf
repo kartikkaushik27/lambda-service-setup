@@ -150,9 +150,12 @@ resource "harness_platform_infra_variable_set" "credentials" {
     value_type = "secret"
   }
 
+  # Resolved by Harness itself at every pipeline execution rather than passed
+  # as a static value, so this can never drift from the account the IACM
+  # stage is actually running in.
   environment_variable {
     key        = "HARNESS_ACCOUNT_ID"
-    value      = var.harness_account_id
+    value      = "<+account.identifier>"
     value_type = "string"
   }
 
