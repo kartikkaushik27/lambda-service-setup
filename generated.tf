@@ -11,6 +11,12 @@
 # Every field must be camelCase (functionName, memorySize, ...), and the
 # manifest must NOT carry a code/S3Bucket/S3Key block: Harness injects the
 # deployment package from the service's artifact source itself.
+#
+# The tags matter beyond housekeeping. Harness reconciles the function's tags
+# to whatever this manifest declares - it will untag anything missing from it -
+# so omitting them would have the deploy stage strip the tags the OpenTofu
+# apply had just set, and the two stages would fight on every run. Both sides
+# read the same local.common_tags, so they agree.
 resource "local_file" "lambda_function_definition" {
   filename        = "${path.module}/${local.function_definition_path}"
   file_permission = "0644"
@@ -22,6 +28,7 @@ resource "local_file" "lambda_function_definition" {
     role_arn      = module.lambda_foundation.execution_role_arn
     timeout       = var.timeout
     memory_size   = var.memory_size
+    tags          = jsonencode(local.common_tags)
   })
 }
 
