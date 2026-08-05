@@ -61,14 +61,21 @@ pipeline:
                         test|stage|prod) regions="us-east-1 us-west-1" ;;
                         *)
                           echo "Branch '$branch' owns no regions - nothing to do."
-                          export WORKSPACE_IDS="[]"
-                          export DEPLOY_ITEMS="[]"
+                          export WORKSPACE_IDS=""
+                          export DEPLOY_ITEMS=""
                           exit 0
                           ;;
                       esac
 
-                      workspace_ids="[]"
-                      deploy_items="[]"
+                      # Looping strategies only accept a comma-separated list of
+                      # plain strings (Harness has no native support for looping
+                      # over JSON), so both lists below are built as such: a
+                      # bare comma-joined list of workspace ids, and a
+                      # comma-joined list of "~"-delimited per-lambda records
+                      # that later stages re-split field by field - see
+                      # <+repeat.item.split("~")[N]> in the stages below.
+                      workspace_ids=""
+                      deploy_items=""
 
                       for f in environments/*.tfvars; do
                         [ -e "$f" ] || continue
@@ -123,31 +130,35 @@ pipeline:
                             exit 1
                           fi
 
-                          workspace_ids=$(echo "$workspace_ids" | jq --arg w "$ws_id" '. + [$w]')
+                          workspace_ids="$${workspace_ids:+$workspace_ids,}$ws_id"
 
                           parsed=$(python3 scripts/parse_lambdas.py "$f" "$region")
-                          deploy_items=$(echo "$deploy_items" | jq \
-                            --argjson lambdas "$(echo "$parsed" | jq -c '.lambdas')" \
-                            --arg connector "$(echo "$parsed" | jq -r '.aws_connector_id')" \
-                            --arg project "$project" --arg pk "$project_key" --arg branch "$branch" \
-                            --arg region "$region" --arg rk "$region_key" --arg ws "$ws_id" '
-                            . + [ $lambdas[] | {
-                              workspace:        $ws,
-                              environment:      ($pk + "_" + $branch),
-                              infra:             ($pk + "_" + $branch + "_" + $rk),
-                              service:           (.service_identifier // ($pk + "_" + .key + "_" + $branch + "_" + $rk)),
-                              artifact_source:   (.artifact_source_identifier // ($pk + "_" + .key + "_artifact")),
-                              function_name:     (.function_name // ($project + "-" + .key + "-" + $branch)),
-                              artifact_connector: $connector,
-                              artifact_region:   $region,
-                              artifact_bucket:   .bucket,
-                              artifact_key:      .object_key
-                            } ]')
+                          aws_connector=$(echo "$parsed" | jq -r '.aws_connector_id')
+                          echo "$parsed" | jq -c '.lambdas[]' > /tmp/lambdas.ndjson
+
+                          while IFS= read -r lam; do
+                            key=$(echo "$lam" | jq -r '.key')
+                            function_name=$(echo "$lam" | jq -r '.function_name // empty')
+                            service_id=$(echo "$lam" | jq -r '.service_identifier // empty')
+                            artifact_source_id=$(echo "$lam" | jq -r '.artifact_source_identifier // empty')
+                            bucket=$(echo "$lam" | jq -r '.bucket')
+                            object_key=$(echo "$lam" | jq -r '.object_key')
+
+                            [ -n "$function_name" ] || function_name="$project-$key-$branch"
+                            [ -n "$service_id" ] || service_id="$${project_key}_$${key}_$${branch}_$${region_key}"
+                            [ -n "$artifact_source_id" ] || artifact_source_id="$${project_key}_$${key}_artifact"
+
+                            environment_id="$${project_key}_$branch"
+                            infra_id="$${environment_id}_$region_key"
+
+                            item="$environment_id~$infra_id~$service_id~$artifact_source_id~$function_name~$aws_connector~$region~$bucket~$object_key"
+                            deploy_items="$${deploy_items:+$deploy_items,}$item"
+                          done < /tmp/lambdas.ndjson
                         done
                       done
 
-                      export WORKSPACE_IDS=$(echo "$workspace_ids" | jq -c .)
-                      export DEPLOY_ITEMS=$(echo "$deploy_items" | jq -c .)
+                      export WORKSPACE_IDS="$workspace_ids"
+                      export DEPLOY_ITEMS="$deploy_items"
                       echo "workspaces: $WORKSPACE_IDS"
                       echo "deploy items: $DEPLOY_ITEMS"
                     envVariables:
@@ -169,7 +180,7 @@ pipeline:
         type: IACM
         strategy:
           repeat:
-            items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.WORKSPACE_IDS>
+            items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.WORKSPACE_IDS.split(",")>
             maxConcurrency: ${max_concurrency}
         spec:
           workspace: <+repeat.item>
@@ -212,35 +223,40 @@ pipeline:
     - stage:
         name: Deploy Lambdas
         identifier: deploy_lambdas
-        description: "Deploys <+repeat.item.function_name> with the native AWS Lambda deploy step, one iteration per lambda Create Workspaces found."
+        # DEPLOY_ITEMS is a comma-separated list of "~"-delimited records:
+        #   0 environment  1 infra  2 service  3 artifact_source
+        #   4 function_name  5 artifact_connector  6 artifact_region
+        #   7 artifact_bucket  8 artifact_key
+        # (built by stage 1 - see the comment above WORKSPACE_IDS there).
+        description: "Deploys <+repeat.item.split(\"~\")[4]> with the native AWS Lambda deploy step, one iteration per lambda Create Workspaces found."
         type: Deployment
         strategy:
           repeat:
-            items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.DEPLOY_ITEMS>
+            items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.DEPLOY_ITEMS.split(",")>
             maxConcurrency: ${max_concurrency}
         spec:
           deploymentType: AwsLambda
           service:
-            serviceRef: <+repeat.item.service>
+            serviceRef: <+repeat.item.split("~")[2]>
             serviceInputs:
               serviceDefinition:
                 type: AwsLambda
                 spec:
                   artifacts:
                     primary:
-                      primaryArtifactRef: <+repeat.item.artifact_source>
+                      primaryArtifactRef: <+repeat.item.split("~")[3]>
                       sources:
-                        - identifier: <+repeat.item.artifact_source>
+                        - identifier: <+repeat.item.split("~")[3]>
                           type: AmazonS3
                           spec:
-                            connectorRef: <+repeat.item.artifact_connector>
-                            region: <+repeat.item.artifact_region>
-                            bucketName: <+repeat.item.artifact_bucket>
-                            filePath: <+repeat.item.artifact_key>
+                            connectorRef: <+repeat.item.split("~")[5]>
+                            region: <+repeat.item.split("~")[6]>
+                            bucketName: <+repeat.item.split("~")[7]>
+                            filePath: <+repeat.item.split("~")[8]>
           environment:
-            environmentRef: <+repeat.item.environment>
+            environmentRef: <+repeat.item.split("~")[0]>
             infrastructureDefinitions:
-              - identifier: <+repeat.item.infra>
+              - identifier: <+repeat.item.split("~")[1]>
           execution:
             steps:
               - step:
@@ -271,11 +287,11 @@ pipeline:
     - stage:
         name: Validate Lambdas
         identifier: validate_lambdas
-        description: "Invokes <+repeat.item.function_name> and fails unless it responds successfully."
+        description: "Invokes <+repeat.item.split(\"~\")[4]> and fails unless it responds successfully."
         type: CI
         strategy:
           repeat:
-            items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.DEPLOY_ITEMS>
+            items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.DEPLOY_ITEMS.split(",")>
             maxConcurrency: ${max_concurrency}
         spec:
           cloneCodebase: false
@@ -300,8 +316,8 @@ pipeline:
                       apk add --no-cache aws-cli >/dev/null
 
                       aws lambda invoke \
-                        --function-name "<+repeat.item.function_name>" \
-                        --region "<+repeat.item.artifact_region>" \
+                        --function-name "<+repeat.item.split(\"~\")[4]>" \
+                        --region "<+repeat.item.split(\"~\")[6]>" \
                         --payload '{}' \
                         --cli-binary-format raw-in-base64-out \
                         /tmp/response.json > /tmp/invoke-meta.json
@@ -319,7 +335,7 @@ pipeline:
                       fi
 
                       if grep -Eq '"statusCode":[[:space:]]*200' /tmp/response.json; then
-                        echo "PASS: <+repeat.item.function_name> responded with statusCode 200"
+                        echo "PASS: <+repeat.item.split(\"~\")[4]> responded with statusCode 200"
                       else
                         echo "FAIL: unexpected response payload"
                         exit 1
