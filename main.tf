@@ -119,5 +119,9 @@ resource "local_file" "iacm_config" {
     artifact_source_identifier = local.artifact_source_identifier
 
     tags = local.common_tags
+
+    # Keeps the rendered tags map aligned, so the generated file is already
+    # `tofu fmt` clean and never shows up as spurious formatting churn.
+    tag_key_width = max([for key in keys(local.common_tags) : length(jsonencode(key))]...)
   })
 }

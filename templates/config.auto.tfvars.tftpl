@@ -42,6 +42,6 @@ harness = {
 
 tags = {
 %{ for key, value in tags ~}
-  ${jsonencode(key)} = ${jsonencode(value)}
+  ${format("%-${tag_key_width}s", jsonencode(key))} = ${jsonencode(value)}
 %{ endfor ~}
 }

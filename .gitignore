@@ -21,3 +21,6 @@ crash.*.log
 
 # OS
 .DS_Store
+
+# Saved plan files
+tfplan

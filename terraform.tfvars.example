@@ -42,14 +42,21 @@ artifact_retention_days = 90
 artifact_bucket_force_destroy = false
 
 # --- Harness --------------------------------------------------------------
-harness_account_id   = "aBh2PBI0T1CYMmA6iQFosg"
-harness_org_id       = "default"
-harness_project_id   = "lambda_service_poc"
-harness_project_name = "Lambda Service POC"
+harness_account_id = "aBh2PBI0T1CYMmA6iQFosg"
+harness_org_id     = "default"
+
+# Existing resources, referenced by identifier and never created here.
+harness_project_id  = "lambda_service_poc"
+aws_connector_id    = "aws_lambda_connector"
+github_connector_id = "github_connector"
+
+harness_environment_type = "PreProduction"
 
 # --- Pipeline and IACM workspace -----------------------------------------
 ci_image     = "alpine:3.19"
 step_timeout = "10m"
+
+cost_estimation_enabled = true
 
 # "latest" tracks whichever version Harness ships. Pin an exact version once
 # you have confirmed it is available to your account.

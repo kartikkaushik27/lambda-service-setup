@@ -43,7 +43,7 @@ harness = {
 tags = {
   "Application" = "lambda-service-poc"
   "Environment" = "dev"
-  "ManagedBy" = "OpenTofu"
-  "Owner" = "platform-engineering"
-  "Repository" = "kartikkaushik27/lambda-service-setup"
+  "ManagedBy"   = "OpenTofu"
+  "Owner"       = "platform-engineering"
+  "Repository"  = "kartikkaushik27/lambda-service-setup"
 }
