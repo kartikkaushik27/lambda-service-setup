@@ -14,7 +14,8 @@
 # regenerated harness/function-definition.json to git.
 
 resource "local_file" "lambda_function_definition" {
-  filename = "${path.module}/harness/function-definition.json"
+  filename        = "${path.module}/harness/function-definition.json"
+  file_permission = "0644"
   content = templatefile("${path.module}/templates/function-definition.json.tftpl", {
     function_name = var.function_name
     runtime       = var.runtime
