@@ -91,6 +91,19 @@ locals {
   environment_id = "${local.project_key}_${var.environment_name}"
 }
 
+# Drops the old Lambda-creation module from every workspace's state without
+# destroying the functions it created - Harness's native deploy step now
+# owns them going forward. Safe to delete this block (and the archive
+# provider requirement above) once every workspace has applied at least once
+# with it present.
+removed {
+  from = module.lambda
+
+  lifecycle {
+    destroy = false
+  }
+}
+
 module "service" {
   source   = "../modules/service"
   for_each = var.lambdas
