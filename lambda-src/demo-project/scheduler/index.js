@@ -3,7 +3,7 @@ exports.handler = async (event) => {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      message: "Hello from the self-service demo-project/scheduler lambda!",
+      message: "Hello from the self-service demo-project/scheduler lambda! (v2-native-owned)",
       input: event,
     }),
   };
