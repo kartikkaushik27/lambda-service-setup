@@ -26,6 +26,14 @@ locals {
   region_key  = replace(var.region, "-", "_")
 
   environment_type = var.environment_name == "prod" ? "Production" : "PreProduction"
+
+  # Every lambda this workspace manages: auto-discovered lambda-src/*
+  # directory names (var.lambda_names, set per run by the pipeline) plus any
+  # explicit override keys (var.lambdas - legacy projects only).
+  lambda_keys = toset(concat(
+    [for n in split(",", var.lambda_names) : n if n != ""],
+    keys(var.lambdas),
+  ))
 }
 
 # The environment is shared by every region this (project, environment_name)
@@ -47,14 +55,18 @@ resource "harness_platform_environment" "this" {
   type       = local.environment_type
 }
 
-# One per (project, environment_name, region) - i.e. one per workspace that
-# manages its own infrastructure (every self-service region; not the legacy
-# project, whose infra is created by the root config instead).
+# One per (project, environment_name, region, lambda) - i.e. one per lambda
+# this workspace manages, not one shared per region - so infra count always
+# tracks lambda count 1:1. Every lambda's infra is identical (region +
+# connector only; nothing lambda-specific), but kept separate per lambda so
+# each can be retired independently as lambdas are added or removed. Not
+# created at all for the legacy project, whose infra is created by the root
+# config instead.
 resource "harness_platform_infrastructure" "this" {
-  count = var.manage_infrastructure ? 1 : 0
+  for_each = var.manage_infrastructure ? local.lambda_keys : []
 
-  identifier      = "${local.project_key}_${var.environment_name}_${local.region_key}"
-  name            = "${var.project_name}-${var.environment_name}-${var.region}"
+  identifier      = "${local.project_key}_${var.environment_name}_${local.region_key}_${each.key}"
+  name            = "${var.project_name}-${var.environment_name}-${var.region}-${each.key}"
   org_id          = var.harness.org_id
   project_id      = var.harness.project_id
   env_id          = "${local.project_key}_${var.environment_name}"
@@ -63,8 +75,8 @@ resource "harness_platform_infrastructure" "this" {
 
   yaml = yamlencode({
     infrastructureDefinition = {
-      name              = "${var.project_name}-${var.environment_name}-${var.region}"
-      identifier        = "${local.project_key}_${var.environment_name}_${local.region_key}"
+      name              = "${var.project_name}-${var.environment_name}-${var.region}-${each.key}"
+      identifier        = "${local.project_key}_${var.environment_name}_${local.region_key}_${each.key}"
       orgIdentifier     = var.harness.org_id
       projectIdentifier = var.harness.project_id
       environmentRef    = "${local.project_key}_${var.environment_name}"
@@ -106,14 +118,14 @@ removed {
 
 module "service" {
   source   = "../modules/service"
-  for_each = var.lambdas
+  for_each = local.lambda_keys
 
   service_identifier = coalesce(
-    each.value.service_identifier,
+    try(var.lambdas[each.key].service_identifier, null),
     "${local.project_key}_${each.key}_${var.environment_name}_${local.region_key}",
   )
   service_name = coalesce(
-    each.value.function_name,
+    try(var.lambdas[each.key].function_name, null),
     "${var.project_name}-${each.key}-${var.environment_name}",
   )
   org_id     = var.harness.org_id
@@ -131,13 +143,13 @@ module "service" {
   # otherwise have both "Deploy Lambdas" iterations resolve the same cached
   # fetch, corrupting the <+repeat.item> function name expression for both.
   function_definition_path = coalesce(
-    each.value.function_definition_path,
+    try(var.lambdas[each.key].function_definition_path, null),
     "harness/${var.project_name}/${each.key}/${var.region}/function-definition.json",
   )
 
   artifact_source_identifier = coalesce(
-    each.value.artifact_source_identifier,
+    try(var.lambdas[each.key].artifact_source_identifier, null),
     "${local.project_key}_${each.key}_artifact",
   )
-  artifact_source_type = each.value.artifact_source_type
+  artifact_source_type = try(var.lambdas[each.key].artifact_source_type, "AmazonS3")
 }

@@ -1,0 +1,9 @@
+{
+  "functionName": "<+stage.variables.function_name>",
+  "runtime": "nodejs20.x",
+  "handler": "index.handler",
+  "role": "arn:aws:iam::915632791698:role/demo-project-api-exec-role",
+  "timeout": 10,
+  "memorySize": 128,
+  "tags": {"Application":"final-validation-greet","ManagedBy":"OpenTofu","Owner":"platform-engineering"}
+}

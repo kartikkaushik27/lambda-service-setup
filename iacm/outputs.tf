@@ -8,7 +8,7 @@ output "harness_environment_id" {
   value       = "${local.project_key}_${var.environment_name}"
 }
 
-output "harness_infrastructure_id" {
-  description = "Infrastructure definition created for this (project, environment_name, region), if this workspace manages its own."
-  value       = var.manage_infrastructure ? harness_platform_infrastructure.this[0].identifier : null
+output "harness_infrastructure_ids" {
+  description = "Infrastructure definition identifier per lambda, keyed by lambda name."
+  value       = { for key, infra in harness_platform_infrastructure.this : key => infra.identifier }
 }

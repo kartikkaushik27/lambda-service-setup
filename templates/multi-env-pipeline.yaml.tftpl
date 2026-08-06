@@ -73,7 +73,7 @@ pipeline:
                         [ "$project" = "${legacy_project_name}" ] && continue
 
                         for region in $regions; do
-                          parsed=$(python3 scripts/parse_lambdas.py "$f" "$region")
+                          parsed=$(python3 scripts/parse_lambdas.py "$f" "$region" "$project")
                           echo "$parsed" | jq -c '.lambdas[]' > /tmp/detect_lambdas.ndjson
 
                           while IFS= read -r lam; do
@@ -160,7 +160,7 @@ pipeline:
                       key=$(echo "$item" | cut -d'~' -f2)
                       region=$(echo "$item" | cut -d'~' -f3)
 
-                      parsed=$(python3 scripts/parse_lambdas.py "environments/$project.tfvars" "$region")
+                      parsed=$(python3 scripts/parse_lambdas.py "environments/$project.tfvars" "$region" "$project")
                       lam=$(echo "$parsed" | jq -c --arg k "$key" '.lambdas[] | select(.key == $k)')
                       bucket=$(echo "$lam" | jq -r '.bucket')
                       object_key=$(echo "$lam" | jq -r '.object_key')
@@ -258,6 +258,11 @@ pipeline:
 
                         project_key=$(echo "$project" | tr '-' '_')
 
+                        # Auto-discovered from lambda-src/<project>/* - the
+                        # entire schema for adding/removing a lambda. Same
+                        # list for every region this project deploys to.
+                        lambda_names_csv=$(ls "lambda-src/$project" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+
                         # The Harness environment is shared by every region this
                         # project/branch deploys to, but each region is a
                         # separate workspace with a separate Terraform state -
@@ -278,7 +283,7 @@ pipeline:
                             --arg id "$ws_id" --arg repo "$repo_url" --arg branch "$branch" \
                             --arg connector "$github_connector" --arg varfile "$f" \
                             --arg project "$project" --arg region "$region" \
-                            --arg manage_env "$is_first_region" \
+                            --arg manage_env "$is_first_region" --arg lambda_names "$lambda_names_csv" \
                             '{
                               identifier: $id, name: $id, provisioner: "opentofu",
                               provisioner_version: "latest", provider_connector: "",
@@ -290,7 +295,8 @@ pipeline:
                                 project_name:      {key: "project_name",      value: $project,   value_type: "string"},
                                 region:            {key: "region",            value: $region,    value_type: "string"},
                                 environment_name:  {key: "environment_name",  value: $branch,    value_type: "string"},
-                                manage_environment: {key: "manage_environment", value: $manage_env, value_type: "string"}
+                                manage_environment: {key: "manage_environment", value: $manage_env, value_type: "string"},
+                                lambda_names:      {key: "lambda_names",      value: $lambda_names, value_type: "string"}
                               },
                               environment_variables: {},
                               terraform_variable_files: [
@@ -321,7 +327,7 @@ pipeline:
 
                           workspace_ids="$${workspace_ids:+$workspace_ids,}$ws_id"
 
-                          parsed=$(python3 scripts/parse_lambdas.py "$f" "$region")
+                          parsed=$(python3 scripts/parse_lambdas.py "$f" "$region" "$project")
                           aws_connector=$(echo "$parsed" | jq -r '.aws_connector_id')
                           echo "$parsed" | jq -c '.lambdas[]' > /tmp/lambdas.ndjson
 
@@ -338,7 +344,7 @@ pipeline:
                             [ -n "$artifact_source_id" ] || artifact_source_id="$${project_key}_$${key}_artifact"
 
                             environment_id="$${project_key}_$branch"
-                            infra_id="$${environment_id}_$region_key"
+                            infra_id="$${environment_id}_$${region_key}_$${key}"
 
                             # Only deploy lambdas Detect Changed Artifacts actually
                             # rebuilt this run - everything else keeps running

@@ -2,19 +2,20 @@
 # project name - "demo-project.tfvars" here means project_name="demo-project"
 # below must match it.
 #
-# Pushing this file (or a change under lambda-src/demo-project/**) to
+# Lambdas are NOT declared here - they're auto-discovered from
+# lambda-src/demo-project/* directories every pipeline run (see
+# iacm/variables.tf: lambda_names). Add a new lambda-src/demo-project/<name>
+# directory (with a matching harness/demo-project/<name>/<region>/
+# function-definition.json manifest) to add a lambda; delete the directory
+# to stop managing it. No file here needs to change either way.
+#
+# Pushing a change under lambda-src/demo-project/** (or this file) to
 # dev/test/stage/prod is the entire deploy workflow:
 #   - dev                -> a workspace in us-east-1
 #   - test, stage, prod  -> a workspace in us-east-1 AND one in us-west-1
 #
 # Only lambda-src/<project>/<lambda> directories that actually changed (or
 # have never been deployed) get rebuilt and redeployed - see README.md.
-#
-# artifact_by_region is the only thing a lambda needs here. The function
-# itself - role, runtime, handler, memory, tags - is defined by its committed
-# harness/<project>/<lambda>/<region>/function-definition.json, which the
-# native deploy step creates or updates the function from. Terraform never
-# touches the function.
 
 project_name = "demo-project"
 
@@ -25,64 +26,11 @@ harness = {
   aws_connector_id    = "aws_lambda_connector"
 }
 
-# Add another entry here to deploy another function from this project - and
-# a matching harness/demo-project/<key>/<region>/function-definition.json.
-lambdas = {
-  api = {
-    # AWS requires a Lambda's S3 source to be in the same region as the
-    # function, so add an entry here for every region this file is deployed
-    # to (us-east-1 always; add us-west-1 too before pushing to
-    # test/stage/prod).
-    artifact_by_region = {
-      "us-east-1" = {
-        bucket = "lambda-service-poc-artifacts-915632791698"
-        key    = "demo-project/api/lambda.zip"
-      }
-      "us-west-1" = {
-        bucket = "lambda-service-poc-artifacts-915632791698-us-west-1"
-        key    = "demo-project/api/lambda.zip"
-      }
-    }
-  }
-
-  worker = {
-    artifact_by_region = {
-      "us-east-1" = {
-        bucket = "lambda-service-poc-artifacts-915632791698"
-        key    = "demo-project/worker/lambda.zip"
-      }
-      "us-west-1" = {
-        bucket = "lambda-service-poc-artifacts-915632791698-us-west-1"
-        key    = "demo-project/worker/lambda.zip"
-      }
-    }
-  }
-
-  notifier = {
-    artifact_by_region = {
-      "us-east-1" = {
-        bucket = "lambda-service-poc-artifacts-915632791698"
-        key    = "demo-project/notifier/lambda.zip"
-      }
-      "us-west-1" = {
-        bucket = "lambda-service-poc-artifacts-915632791698-us-west-1"
-        key    = "demo-project/notifier/lambda.zip"
-      }
-    }
-  }
-
-  scheduler = {
-    artifact_by_region = {
-      "us-east-1" = {
-        bucket = "lambda-service-poc-artifacts-915632791698"
-        key    = "demo-project/scheduler/lambda.zip"
-      }
-      "us-west-1" = {
-        bucket = "lambda-service-poc-artifacts-915632791698-us-west-1"
-        key    = "demo-project/scheduler/lambda.zip"
-      }
-    }
-  }
+# AWS requires a Lambda's S3 source to be in the same region as the
+# function, so every region this project is deployed to needs an entry here.
+artifact_buckets = {
+  "us-east-1" = "lambda-service-poc-artifacts-915632791698"
+  "us-west-1" = "lambda-service-poc-artifacts-915632791698-us-west-1"
 }
 
 tags = {

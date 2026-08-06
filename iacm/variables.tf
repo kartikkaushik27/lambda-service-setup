@@ -77,42 +77,47 @@ variable "harness" {
   })
 }
 
-# Multiple lambdas, keyed by a short slug used to derive every Harness/AWS
-# identifier this workspace creates for that lambda (function name, service
-# identifier, artifact source identifier). Add another entry to deploy
-# another function from the same project/environment/region - see
-# environments/*.tfvars.
+# Auto-discovered lambdas: a comma-separated list of lambda-src/<project>/*
+# directory names, set as a workspace-level Terraform variable by the
+# pipeline's "Create Workspaces" step every run (not part of the committed
+# tfvars file) - so adding or removing a lambda-src directory is the entire
+# workflow for adding or removing a lambda. Its artifact is assumed to live
+# at <project>/<name>/lambda.zip in var.artifact_buckets[var.region].
+variable "lambda_names" {
+  description = "Comma-separated lambda-src/<project>/* directory names this workspace deploys, auto-discovered per run."
+  type        = string
+  default     = ""
+}
+
+# One bucket per region this project is ever deployed to (AWS requires a
+# Lambda's S3 source to live in the same region as the function) - small and
+# static, so it stays in the committed tfvars file.
+variable "artifact_buckets" {
+  description = "S3 bucket holding every lambda's artifact for this project, keyed by region."
+  type        = map(string)
+  default     = {}
+}
+
+# Legacy escape hatch only: pins identifiers for a project migrated onto this
+# schema from hand-named resources, so it isn't renamed/recreated. New
+# projects should rely on lambda_names auto-discovery instead and never need
+# this - see environments/demo-project.tfvars (none) vs environments/lambda-service-poc.tfvars (uses it).
 variable "lambdas" {
-  description = "Lambda functions this project deploys in this environment/region."
+  description = "Explicit per-lambda overrides, keyed the same as lambda_names would auto-discover. Only needed to pin pre-existing identifiers."
 
   type = map(object({
-    # Bring-your-own deployment package: this workspace deploys whatever is
-    # already at this lambda's bucket/key for var.region. Keyed by region,
-    # not a single bucket/key, because AWS requires a Lambda's S3 source to
-    # live in the same region as the function - a project deployed to more
-    # than one region needs the same build published to a bucket in each.
-    artifact_by_region = map(object({
+    artifact_by_region = optional(map(object({
       bucket = string
       key    = string
-    }))
-
-    function_definition_path = optional(string)
-    artifact_source_type     = optional(string, "AmazonS3")
-
-    # AWS Lambda function names and Harness identifiers can't be renamed
-    # in place - changing either forces a destroy and recreate. Every
-    # identifier below defaults to a project/environment/region-scoped
-    # convention, but stays overridable so a project can be migrated onto
-    # this schema without renaming the resources it already has.
-    function_name              = optional(string)
-    service_identifier         = optional(string)
-    artifact_source_identifier = optional(string)
+    })))
+    function_definition_path   = optional(string)
+    artifact_source_type       = optional(string, "AmazonS3")
+    function_name               = optional(string)
+    service_identifier          = optional(string)
+    artifact_source_identifier  = optional(string)
   }))
 
-  validation {
-    condition     = length(var.lambdas) > 0
-    error_message = "lambdas must declare at least one function."
-  }
+  default = {}
 }
 
 variable "tags" {
