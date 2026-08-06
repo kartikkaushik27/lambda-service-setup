@@ -61,6 +61,7 @@ pipeline:
                       fi
 
                       build_items=""
+                      touched_projects=""
 
                       for f in environments/*.tfvars; do
                         [ -e "$f" ] || continue
@@ -71,6 +72,16 @@ pipeline:
                         # already owns the AWS Lambda function named here -
                         # this self-service flow must not also manage it.
                         [ "$project" = "${legacy_project_name}" ] && continue
+
+                        # Only a project whose own tfvars or lambda-src
+                        # changed gets a workspace apply this run - otherwise
+                        # every push to any project would re-apply every
+                        # other project's IACM workspace too.
+                        if ! echo "$changed_files" | grep -qE "^environments/$project\.tfvars\$|^lambda-src/$project/"; then
+                          echo "SKIP: $project untouched by this push"
+                          continue
+                        fi
+                        touched_projects="$${touched_projects:+$touched_projects,}$project"
 
                         for region in $regions; do
                           parsed=$(python3 scripts/parse_lambdas.py "$f" "$region" "$project")
@@ -105,13 +116,16 @@ pipeline:
                       done
 
                       export BUILD_ITEMS="$build_items"
+                      export TOUCHED_PROJECTS="$touched_projects"
                       echo "build items: $BUILD_ITEMS"
+                      echo "touched projects: $TOUCHED_PROJECTS"
                     envVariables:
                       AWS_ACCESS_KEY_ID: <+secrets.getValue("${aws_access_key_id_secret}")>
                       AWS_SECRET_ACCESS_KEY: <+secrets.getValue("${aws_secret_access_key_secret}")>
                       AWS_SESSION_TOKEN: <+secrets.getValue("${aws_session_token_secret}")>
                     outputVariables:
                       - name: BUILD_ITEMS
+                      - name: TOUCHED_PROJECTS
         tags: {}
 
     # -------------------------------------------------------------------
@@ -219,6 +233,7 @@ pipeline:
                       # $BUILD_ITEMS reference below fail with "parameter not
                       # set" even though "nothing to build" is a valid outcome.
                       BUILD_ITEMS="$${BUILD_ITEMS:-}"
+                      TOUCHED_PROJECTS="$${TOUCHED_PROJECTS:-}"
 
                       account_id="<+account.identifier>"
                       org_id="${org_id}"
@@ -249,12 +264,20 @@ pipeline:
                       workspace_ids=""
                       deploy_items=""
 
-                      for f in environments/*.tfvars; do
-                        [ -e "$f" ] || continue
-                        project=$(basename "$f" .tfvars)
+                      # Only projects Detect Changed Artifacts flagged as
+                      # touched by this push get a workspace apply - a push
+                      # to project A must never also re-apply project B's
+                      # workspace.
+                      if [ -z "$TOUCHED_PROJECTS" ]; then
+                        echo "No project touched by this push - nothing to do."
+                        export WORKSPACE_IDS=""
+                        export DEPLOY_ITEMS=""
+                        exit 0
+                      fi
 
-                        # See the matching skip in the Build Artifacts stage.
-                        [ "$project" = "${legacy_project_name}" ] && continue
+                      for project in $(echo "$TOUCHED_PROJECTS" | tr ',' ' '); do
+                        f="environments/$project.tfvars"
+                        [ -e "$f" ] || continue
 
                         project_key=$(echo "$project" | tr '-' '_')
 
@@ -370,6 +393,7 @@ pipeline:
                     envVariables:
                       HARNESS_PLATFORM_API_KEY: <+secrets.getValue("${harness_pat_secret}")>
                       BUILD_ITEMS: <+pipeline.stages.detect_changes.spec.execution.steps.detect_changes.output.outputVariables.BUILD_ITEMS>
+                      TOUCHED_PROJECTS: <+pipeline.stages.detect_changes.spec.execution.steps.detect_changes.output.outputVariables.TOUCHED_PROJECTS>
                     outputVariables:
                       - name: WORKSPACE_IDS
                       - name: DEPLOY_ITEMS
@@ -385,6 +409,9 @@ pipeline:
         identifier: create_lambda_and_service
         description: "Runs init/plan/apply against <+repeat.item>, one iteration per workspace Create Workspaces touched. Sequential (maxConcurrency 1): the first region's workspace for each project owns the shared Harness environment, so it must finish before any other region's workspace runs."
         type: IACM
+        when:
+          pipelineStatus: Success
+          condition: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.WORKSPACE_IDS> != ""
         strategy:
           repeat:
             items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.WORKSPACE_IDS.split(",")>
