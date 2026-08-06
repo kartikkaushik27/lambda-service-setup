@@ -126,11 +126,16 @@ module "service" {
   github_branch       = var.harness.github_branch
 
   # Convention: environments/<project>.tfvars is paired with a committed
-  # manifest at harness/<project>/<lambda key>/function-definition.json,
-  # unless the project overrides the path explicitly.
+  # manifest at harness/<project>/<lambda key>/<region>/function-definition.json,
+  # unless the project overrides the path explicitly. The region segment is
+  # required even though every region's copy is identical content - Harness
+  # fetches manifests by git path once per pipeline execution, so a project
+  # deploying the same lambda to 2 regions in one run (test/stage/prod) would
+  # otherwise have both "Deploy Lambdas" iterations resolve the same cached
+  # fetch, corrupting the <+repeat.item> function name expression for both.
   function_definition_path = coalesce(
     each.value.function_definition_path,
-    "harness/${var.project_name}/${each.key}/function-definition.json",
+    "harness/${var.project_name}/${each.key}/${var.region}/function-definition.json",
   )
 
   artifact_source_identifier = coalesce(

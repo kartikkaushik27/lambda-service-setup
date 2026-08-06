@@ -125,10 +125,21 @@ credentials: it forwards the key pair but drops the session token.
 
 ## Two things worth knowing
 
-**Detecting new code.** The stable S3 key never changes, so the function module
-reads the object's `version_id` and passes it as `s3_object_version`. Without
-that, a plan would see identical bucket/key arguments and leave the function
-untouched.
+**Terraform only creates a code placeholder.** `modules/lambda` creates each
+function with a tiny inline placeholder and then ignores every code-related
+attribute forever after (`lifecycle.ignore_changes`). Real code is deployed
+exclusively by the pipeline's native `AwsLambdaDeploy` step. This split exists
+because Terraform re-publishing code from S3 on every apply used to race with
+that same native step doing the same deploy right after it, causing
+`CodeSHA256` mismatches and 409s.
+
+**One function-definition.json per region.** Harness fetches a deploy
+manifest by its git path once per pipeline execution, so if the same lambda
+deploys to 2 regions in one run (test/stage/prod), a single shared manifest
+path used by both `Deploy Lambdas` iterations corrupts the `<+repeat.item>`
+function-name expression for both. That's why manifests live at
+`harness/<project>/<lambda>/<region>/function-definition.json` (one identical
+copy per region) instead of `harness/<project>/<lambda>/function-definition.json`.
 
 **Tags.** Harness reconciles the function's tags to the deploy manifest and
 removes any that are missing from it. The generated manifest therefore includes
