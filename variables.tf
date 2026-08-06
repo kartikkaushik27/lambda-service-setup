@@ -238,9 +238,15 @@ variable "multi_env_iacm_step_timeout" {
 }
 
 variable "multi_env_max_concurrency" {
-  description = "How many deploys/validations the looping strategies run in parallel in the Deploy Lambdas and Validate Lambdas stages. Keep modest - each iteration is a full Lambda deploy."
+  description = "How many validations the Validate Lambdas stage runs in parallel. Each iteration is just a read-only invoke against an already-deployed function, so this can safely run wider."
   type        = number
   default     = 3
+}
+
+variable "multi_env_deploy_max_concurrency" {
+  description = "How many AwsLambdaDeploy iterations the Deploy Lambdas stage runs in parallel. Must stay 1: Harness resolves <+repeat.item> inside the git-fetched function-definition.json manifest per-iteration, and concurrent iterations of that resolution have been observed to cross-contaminate (one deploy targeting another iteration's function name), so deploys must be serialized."
+  type        = number
+  default     = 1
 }
 
 variable "multi_env_iacm_max_concurrency" {

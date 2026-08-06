@@ -437,7 +437,7 @@ pipeline:
         strategy:
           repeat:
             items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.DEPLOY_ITEMS.split(",")>
-            maxConcurrency: ${max_concurrency}
+            maxConcurrency: ${deploy_max_concurrency}
         spec:
           deploymentType: AwsLambda
           service:
