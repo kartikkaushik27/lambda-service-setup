@@ -1,7 +1,0 @@
-{
-  "name": "lambda-service-poc",
-  "version": "1.0.0",
-  "description": "Sample AWS Lambda handler deployed via Harness's native AWS Lambda deployment type",
-  "main": "index.js",
-  "license": "UNLICENSED"
-}

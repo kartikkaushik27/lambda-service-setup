@@ -104,14 +104,19 @@ a `backend "s3"` block with DynamoDB locking.
 
 ## Where values come from
 
-`variables.tf` is the only place a value is defined. Everything the pipeline
-needs is rendered from it into two generated, committed files:
+`variables.tf` is the only place a value is defined for the original,
+dedicated project. Everything its pipeline needs is rendered from it into two
+generated, committed files:
 
 - `harness/function-definition.json` – the manifest the native deploy step
   applies.
-- `iacm/config.auto.tfvars` – non-secret inputs for the IACM run. OpenTofu
-  loads `*.auto.tfvars` automatically, which is why the workspace itself
-  declares **no** variables.
+- `environments/lambda-service-poc.tfvars` – non-secret inputs for its IACM
+  workspace, linked as a Git variable file (so the workspace itself declares
+  no variables).
+
+Every other, self-service project instead owns a hand-written
+`environments/<project>.tfvars` – see "Self-service multi-lambda projects"
+below.
 
 Credentials reach the IACM run only as environment variables, from a
 credentials variable set attached to the workspace, so they cannot end up in a
