@@ -8,11 +8,6 @@ output "lambda_versions" {
   value       = { for key, mod in module.lambda : key => mod.version }
 }
 
-output "artifact_version_ids" {
-  description = "S3 object version of every deployed package, keyed by lambda name - for tracing a running function back to a build."
-  value       = { for key, mod in module.lambda : key => mod.artifact_version_id }
-}
-
 output "harness_service_ids" {
   description = "Identifier of every Harness service created, keyed by lambda name."
   value       = { for key, mod in module.service : key => mod.service_id }
