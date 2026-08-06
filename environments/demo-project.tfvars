@@ -49,6 +49,27 @@ lambdas = {
 
     # Paired manifest committed at harness/demo-project/api/function-definition.json
   }
+
+  worker = {
+    runtime            = "nodejs20.x"
+    handler            = "index.handler"
+    timeout            = 10
+    memory_size        = 128
+    execution_role_arn = "arn:aws:iam::915632791698:role/demo-project-api-exec-role"
+
+    artifact_by_region = {
+      "us-east-1" = {
+        bucket = "lambda-service-poc-artifacts-915632791698"
+        key    = "demo-project/worker/lambda.zip"
+      }
+      "us-west-1" = {
+        bucket = "lambda-service-poc-artifacts-915632791698-us-west-1"
+        key    = "demo-project/worker/lambda.zip"
+      }
+    }
+
+    # Paired manifest committed at harness/demo-project/worker/function-definition.json
+  }
 }
 
 tags = {

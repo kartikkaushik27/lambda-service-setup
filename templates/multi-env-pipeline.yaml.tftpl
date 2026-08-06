@@ -3,7 +3,7 @@ pipeline:
   identifier: ${pipeline_identifier}
   projectIdentifier: ${project_id}
   orgIdentifier: ${org_id}
-  description: "Triggered by a push to dev/test/stage/prod. Builds and publishes every lambda's artifact, creates or updates one IACM workspace per (project, region) the branch owns, applies every one of them, deploys every lambda with the native AWS Lambda deploy step, then verifies each. Artifact publishing and workspace creation are scripted (no native step for either); every other stage uses native Harness steps, run once per item via a looping strategy."
+  description: "Triggered by a push to dev/test/stage/prod. Detects which lambdas changed (or were never deployed), builds and publishes only those artifacts in parallel, creates or updates one IACM workspace per (project, region) the branch owns, applies every one of them, deploys only the changed lambdas with the native AWS Lambda deploy step, then verifies each. Change detection, artifact publishing, and workspace creation are scripted (no native step for any); every other stage uses native Harness steps, run once per item via a looping strategy."
   tags: {}
   properties:
     ci:
@@ -13,17 +13,16 @@ pipeline:
         build: <+input>
   stages:
     # -------------------------------------------------------------------
-    # 1. Package and publish every lambda's deployment artifact, for every
-    #    region the triggering branch owns, to exactly the bucket/key its
-    #    environments/*.tfvars entry declares. Source lives at
-    #    lambda-src/<project>/<lambda-key>/ - a project with no directory
-    #    there is skipped (its artifact is assumed to be published by
-    #    something else, e.g. a separate app's own CI).
+    # 1. Find which (project, lambda, region) artifacts actually need a new
+    #    build: source changed since the last commit, or the function has
+    #    never been deployed yet. Everything else is left untouched - this
+    #    is what keeps an N-lambda project from redeploying all N whenever
+    #    only some of them change.
     # -------------------------------------------------------------------
     - stage:
-        name: Build Artifacts
-        identifier: build_artifacts
-        description: "Zips and publishes every lambda-src/<project>/<lambda> to the S3 location its environments/*.tfvars declares, for every region this branch owns."
+        name: Detect Changed Artifacts
+        identifier: detect_changes
+        description: "Finds which lambda-src/<project>/<lambda> directories changed in the last push, or have never been deployed, for every region this branch owns."
         type: CI
         spec:
           cloneCodebase: true
@@ -37,22 +36,31 @@ pipeline:
             steps:
               - step:
                   type: Run
-                  name: Build and Publish Artifacts
-                  identifier: build_and_publish_artifacts
+                  name: Detect Changed Artifacts
+                  identifier: detect_changes
                   timeout: ${workspace_step_timeout}
                   spec:
                     shell: Sh
                     image: ${ci_image}
                     command: |-
                       set -eu
-                      apk add --no-cache zip aws-cli jq python3 >/dev/null
+                      apk add --no-cache git aws-cli jq python3 >/dev/null
 
                       branch="<+codebase.branch>"
                       case "$branch" in
                         dev) regions="us-east-1" ;;
                         test|stage|prod) regions="us-east-1 us-west-1" ;;
-                        *) echo "Branch '$branch' owns no regions - nothing to build."; exit 0 ;;
+                        *) echo "Branch '$branch' owns no regions - nothing to build."; export BUILD_ITEMS=""; exit 0 ;;
                       esac
+
+                      git fetch --quiet --unshallow 2>/dev/null || git fetch --quiet --depth=2 origin "$branch" 2>/dev/null || true
+                      if git rev-parse HEAD~1 >/dev/null 2>&1; then
+                        changed_files=$(git diff --name-only HEAD~1 HEAD)
+                      else
+                        changed_files=$(git ls-files)
+                      fi
+
+                      build_items=""
 
                       for f in environments/*.tfvars; do
                         [ -e "$f" ] || continue
@@ -66,12 +74,12 @@ pipeline:
 
                         for region in $regions; do
                           parsed=$(python3 scripts/parse_lambdas.py "$f" "$region")
-                          echo "$parsed" | jq -c '.lambdas[]' > /tmp/build_lambdas.ndjson
+                          echo "$parsed" | jq -c '.lambdas[]' > /tmp/detect_lambdas.ndjson
 
                           while IFS= read -r lam; do
                             key=$(echo "$lam" | jq -r '.key')
-                            bucket=$(echo "$lam" | jq -r '.bucket')
-                            object_key=$(echo "$lam" | jq -r '.object_key')
+                            function_name=$(echo "$lam" | jq -r '.function_name // empty')
+                            [ -n "$function_name" ] || function_name="$project-$key-$branch"
                             src="lambda-src/$project/$key"
 
                             if [ ! -d "$src" ]; then
@@ -79,14 +87,90 @@ pipeline:
                               continue
                             fi
 
-                            echo "=== Building $project/$key for $region -> s3://$bucket/$object_key ==="
-                            pkg="/tmp/$project-$key.zip"
-                            rm -f "$pkg"
-                            (cd "$src" && zip -r -q "$pkg" .)
-                            aws s3 cp "$pkg" "s3://$bucket/$object_key" --region "$region"
-                          done < /tmp/build_lambdas.ndjson
+                            reason=""
+                            if echo "$changed_files" | grep -q "^$src/"; then
+                              reason="source changed"
+                            elif ! aws lambda get-function --function-name "$function_name" --region "$region" >/dev/null 2>&1; then
+                              reason="not deployed yet"
+                            fi
+
+                            if [ -n "$reason" ]; then
+                              echo "BUILD: $project/$key in $region ($reason)"
+                              build_items="$${build_items:+$build_items,}$project~$key~$region"
+                            else
+                              echo "SKIP: $project/$key in $region unchanged"
+                            fi
+                          done < /tmp/detect_lambdas.ndjson
                         done
                       done
+
+                      export BUILD_ITEMS="$build_items"
+                      echo "build items: $BUILD_ITEMS"
+                    envVariables:
+                      AWS_ACCESS_KEY_ID: <+secrets.getValue("${aws_access_key_id_secret}")>
+                      AWS_SECRET_ACCESS_KEY: <+secrets.getValue("${aws_secret_access_key_secret}")>
+                      AWS_SESSION_TOKEN: <+secrets.getValue("${aws_session_token_secret}")>
+                    outputVariables:
+                      - name: BUILD_ITEMS
+        tags: {}
+
+    # -------------------------------------------------------------------
+    # 2. Build and publish only the artifacts Detect Changed Artifacts
+    #    flagged, one matrix cell per (project, lambda, region), running in
+    #    parallel.
+    # -------------------------------------------------------------------
+    - stage:
+        name: Build Artifacts
+        identifier: build_artifacts
+        description: "Zips and publishes <+matrix.item> to the S3 location its environments/*.tfvars declares."
+        type: CI
+        when:
+          pipelineStatus: Success
+          condition: <+pipeline.stages.detect_changes.spec.execution.steps.detect_changes.output.outputVariables.BUILD_ITEMS> != ""
+        strategy:
+          matrix:
+            item: <+pipeline.stages.detect_changes.spec.execution.steps.detect_changes.output.outputVariables.BUILD_ITEMS.split(",")>
+            maxConcurrency: ${max_concurrency}
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Build and Publish Artifact
+                  identifier: build_and_publish_artifact
+                  timeout: ${workspace_step_timeout}
+                  spec:
+                    shell: Sh
+                    image: ${ci_image}
+                    command: |-
+                      set -eu
+                      apk add --no-cache zip aws-cli jq python3 >/dev/null
+
+                      # <+matrix.item> is one "project~lambda~region" entry from
+                      # BUILD_ITEMS (Detect Changed Artifacts).
+                      item="<+matrix.item>"
+                      project=$(echo "$item" | cut -d'~' -f1)
+                      key=$(echo "$item" | cut -d'~' -f2)
+                      region=$(echo "$item" | cut -d'~' -f3)
+
+                      parsed=$(python3 scripts/parse_lambdas.py "environments/$project.tfvars" "$region")
+                      lam=$(echo "$parsed" | jq -c --arg k "$key" '.lambdas[] | select(.key == $k)')
+                      bucket=$(echo "$lam" | jq -r '.bucket')
+                      object_key=$(echo "$lam" | jq -r '.object_key')
+                      src="lambda-src/$project/$key"
+
+                      echo "=== Building $project/$key for $region -> s3://$bucket/$object_key ==="
+                      pkg="/tmp/$project-$key.zip"
+                      rm -f "$pkg"
+                      (cd "$src" && zip -r -q "$pkg" .)
+                      aws s3 cp "$pkg" "s3://$bucket/$object_key" --region "$region"
                     envVariables:
                       AWS_ACCESS_KEY_ID: <+secrets.getValue("${aws_access_key_id_secret}")>
                       AWS_SECRET_ACCESS_KEY: <+secrets.getValue("${aws_secret_access_key_secret}")>
@@ -94,7 +178,7 @@ pipeline:
         tags: {}
 
     # -------------------------------------------------------------------
-    # 2. Create/update the IACM workspace for every environments/*.tfvars
+    # 3. Create/update the IACM workspace for every environments/*.tfvars
     #    project, for every region the triggering branch owns, and export
     #    two lists for the looping strategies below:
     #      WORKSPACE_IDS  - one entry per (project, region)
@@ -249,8 +333,19 @@ pipeline:
                             environment_id="$${project_key}_$branch"
                             infra_id="$${environment_id}_$region_key"
 
-                            item="$environment_id~$infra_id~$service_id~$artifact_source_id~$function_name~$aws_connector~$region~$bucket~$object_key"
-                            deploy_items="$${deploy_items:+$deploy_items,}$item"
+                            # Only deploy lambdas Detect Changed Artifacts actually
+                            # rebuilt this run - everything else keeps running
+                            # whatever code is already on it.
+                            match_key="$project~$key~$region"
+                            case ",$BUILD_ITEMS," in
+                              *",$match_key,"*)
+                                item="$environment_id~$infra_id~$service_id~$artifact_source_id~$function_name~$aws_connector~$region~$bucket~$object_key"
+                                deploy_items="$${deploy_items:+$deploy_items,}$item"
+                                ;;
+                              *)
+                                echo "SKIP deploy for $match_key - not rebuilt this run"
+                                ;;
+                            esac
                           done < /tmp/lambdas.ndjson
                         done
                       done
@@ -261,13 +356,14 @@ pipeline:
                       echo "deploy items: $DEPLOY_ITEMS"
                     envVariables:
                       HARNESS_PLATFORM_API_KEY: <+secrets.getValue("${harness_pat_secret}")>
+                      BUILD_ITEMS: <+pipeline.stages.detect_changes.spec.execution.steps.detect_changes.output.outputVariables.BUILD_ITEMS>
                     outputVariables:
                       - name: WORKSPACE_IDS
                       - name: DEPLOY_ITEMS
         tags: {}
 
     # -------------------------------------------------------------------
-    # 3. init/plan/apply against every workspace stage 2 touched - native
+    # 4. init/plan/apply against every workspace stage 3 touched - native
     #    IACMTerraformPlugin steps, run once per workspace via a repeat
     #    looping strategy over WORKSPACE_IDS.
     # -------------------------------------------------------------------
@@ -314,7 +410,7 @@ pipeline:
         tags: {}
 
     # -------------------------------------------------------------------
-    # 4. Deploy every lambda with the native AwsLambdaDeploy step, against
+    # 5. Deploy every changed lambda with the native AwsLambdaDeploy step, against
     #    the service/environment/infra Terraform just created for it - one
     #    iteration per DEPLOY_ITEMS entry via a repeat looping strategy.
     # -------------------------------------------------------------------
@@ -326,8 +422,11 @@ pipeline:
         #   4 function_name  5 artifact_connector  6 artifact_region
         #   7 artifact_bucket  8 artifact_key
         # (built by the Create Workspaces stage - see the comment above WORKSPACE_IDS there).
-        description: "Deploys <+repeat.item.split(\"~\")[4]> with the native AWS Lambda deploy step, one iteration per lambda Create Workspaces found."
+        description: "Deploys <+repeat.item.split(\"~\")[4]> with the native AWS Lambda deploy step, one iteration per lambda Detect Changed Artifacts rebuilt."
         type: Deployment
+        when:
+          pipelineStatus: Success
+          condition: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.DEPLOY_ITEMS> != ""
         strategy:
           repeat:
             items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.DEPLOY_ITEMS.split(",")>
@@ -379,7 +478,7 @@ pipeline:
         tags: {}
 
     # -------------------------------------------------------------------
-    # 5. Prove every deployment works by invoking the function and
+    # 6. Prove every deployment works by invoking the function and
     #    asserting on its response - one iteration per DEPLOY_ITEMS entry.
     # -------------------------------------------------------------------
     - stage:
@@ -387,6 +486,9 @@ pipeline:
         identifier: validate_lambdas
         description: "Invokes <+repeat.item.split(\"~\")[4]> and fails unless it responds successfully."
         type: CI
+        when:
+          pipelineStatus: Success
+          condition: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.DEPLOY_ITEMS> != ""
         strategy:
           repeat:
             items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.DEPLOY_ITEMS.split(",")>

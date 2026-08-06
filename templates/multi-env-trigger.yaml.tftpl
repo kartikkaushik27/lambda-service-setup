@@ -2,7 +2,7 @@ trigger:
   name: ${trigger_name}
   identifier: ${trigger_identifier}
   enabled: true
-  description: "Pushes to '${branch}' that touch environments/** run ${pipeline_name} for that branch."
+  description: "Pushes to '${branch}' that touch environments/** or lambda-src/** run ${pipeline_name} for that branch."
   tags: {}
   orgIdentifier: ${org_id}
   projectIdentifier: ${project_id}
@@ -23,7 +23,7 @@ trigger:
               value: ${branch}
             - key: changedFiles
               operator: Regex
-              value: environments/.*
+              value: (environments|lambda-src)/.*
           headerConditions: []
           actions: []
   inputYaml: |

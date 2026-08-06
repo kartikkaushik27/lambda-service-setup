@@ -1,0 +1,7 @@
+{
+  "name": "demo-project-worker",
+  "version": "1.0.0",
+  "description": "Sample AWS Lambda handler for the self-service demo-project worker example",
+  "main": "index.js",
+  "license": "UNLICENSED"
+}
