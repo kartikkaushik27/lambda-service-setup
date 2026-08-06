@@ -58,6 +58,36 @@ lambdas = {
       }
     }
   }
+
+  notifier = {
+    execution_role_arn = "arn:aws:iam::915632791698:role/demo-project-api-exec-role"
+
+    artifact_by_region = {
+      "us-east-1" = {
+        bucket = "lambda-service-poc-artifacts-915632791698"
+        key    = "demo-project/notifier/lambda.zip"
+      }
+      "us-west-1" = {
+        bucket = "lambda-service-poc-artifacts-915632791698-us-west-1"
+        key    = "demo-project/notifier/lambda.zip"
+      }
+    }
+  }
+
+  scheduler = {
+    execution_role_arn = "arn:aws:iam::915632791698:role/demo-project-api-exec-role"
+
+    artifact_by_region = {
+      "us-east-1" = {
+        bucket = "lambda-service-poc-artifacts-915632791698"
+        key    = "demo-project/scheduler/lambda.zip"
+      }
+      "us-west-1" = {
+        bucket = "lambda-service-poc-artifacts-915632791698-us-west-1"
+        key    = "demo-project/scheduler/lambda.zip"
+      }
+    }
+  }
 }
 
 tags = {

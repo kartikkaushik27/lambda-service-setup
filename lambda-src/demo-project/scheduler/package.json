@@ -1,0 +1,7 @@
+{
+  "name": "demo-project-scheduler",
+  "version": "1.0.0",
+  "description": "Sample AWS Lambda handler for the self-service demo-project example",
+  "main": "index.js",
+  "license": "UNLICENSED"
+}
