@@ -1,5 +1,5 @@
 {
-  "functionName": "<+repeat.item.split(\"~\")[4]>",
+  "functionName": "<+stage.variables.function_name>",
   "runtime": "nodejs20.x",
   "handler": "index.handler",
   "role": "arn:aws:iam::915632791698:role/demo-project-api-exec-role",

@@ -438,6 +438,15 @@ pipeline:
           repeat:
             items: <+pipeline.stages.create_workspaces.spec.execution.steps.create_or_update_workspaces.output.outputVariables.DEPLOY_ITEMS.split(",")>
             maxConcurrency: ${deploy_max_concurrency}
+        variables:
+          # The committed function-definition.json references this plain
+          # variable instead of embedding <+repeat.item.split(...)> directly -
+          # raw text substitution inside a git-fetched manifest does not
+          # reliably evaluate JEXL method calls like .split(), which was
+          # silently resolving functionName to the literal string "null".
+          - name: function_name
+            type: String
+            value: <+repeat.item.split("~")[4]>
         spec:
           deploymentType: AwsLambda
           service:
