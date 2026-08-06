@@ -1,11 +1,16 @@
 # Executed by every (project, environment, region) workspace on every run -
 # this is the deployment.
 #
-# Three modules per workspace:
+# Two things per workspace:
 #   - one Harness environment/infrastructure definition for this
-#     (environment, region) - modules/environment
-#   - one Lambda function per entry in var.lambdas - modules/lambda
+#     (environment, region)
 #   - one Harness service per entry in var.lambdas - modules/service
+#
+# The AWS Lambda function itself is NOT created here. Harness's native
+# AwsLambdaDeploy step creates it on first deploy (from the committed
+# function-definition.json) and updates it on every deploy after - so
+# Terraform never touches the function, and there is nothing for it to
+# race with.
 #
 # Inputs come from the project's committed tfvars file
 # (environments/<project_name>.tfvars) plus the region/environment_name
@@ -86,27 +91,6 @@ locals {
   environment_id = "${local.project_key}_${var.environment_name}"
 }
 
-module "lambda" {
-  source   = "../modules/lambda"
-  for_each = var.lambdas
-
-  function_name = coalesce(
-    each.value.function_name,
-    "${var.project_name}-${each.key}-${var.environment_name}",
-  )
-  description        = "Deployed by Harness IACM from ${lookup(var.tags, "Repository", "OpenTofu")} (${var.project_name}/${each.key}/${var.environment_name}/${var.region})"
-  execution_role_arn = each.value.execution_role_arn
-
-  runtime      = each.value.runtime
-  handler      = each.value.handler
-  timeout      = each.value.timeout
-  memory_size  = each.value.memory_size
-  architecture = each.value.architecture
-
-  environment_variables = each.value.environment_variables
-  publish_version       = each.value.publish_version
-}
-
 module "service" {
   source   = "../modules/service"
   for_each = var.lambdas
@@ -143,8 +127,4 @@ module "service" {
     "${local.project_key}_${each.key}_artifact",
   )
   artifact_source_type = each.value.artifact_source_type
-
-  # Each service describes a function that must already exist, so a failed
-  # function deployment never leaves a service pointing at nothing.
-  depends_on = [module.lambda]
 }

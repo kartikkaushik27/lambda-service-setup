@@ -110,15 +110,6 @@ resource "local_file" "project_tfvars" {
     region       = var.aws_region
     lambda_key   = local.lambda_key
 
-    runtime               = var.runtime
-    handler               = var.handler
-    timeout               = var.timeout
-    memory_size           = var.memory_size
-    architecture          = var.lambda_architecture
-    publish_version       = var.lambda_publish_version
-    execution_role_arn    = aws_iam_role.lambda_exec.arn
-    environment_variables = jsonencode(var.lambda_environment_variables)
-
     artifact_bucket = aws_s3_bucket.artifacts.id
     artifact_key    = local.artifact_key
 

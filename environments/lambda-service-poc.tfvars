@@ -26,15 +26,6 @@ harness = {
 
 lambdas = {
   lambda_service = {
-    runtime               = "nodejs20.x"
-    handler               = "index.handler"
-    timeout               = 10
-    memory_size           = 128
-    execution_role_arn    = "arn:aws:iam::915632791698:role/lambda-service-poc-exec-role"
-    architecture          = "x86_64"
-    publish_version       = true
-    environment_variables = {}
-
     artifact_by_region = {
       "us-east-1" = {
         bucket = "lambda-service-poc-artifacts-915632791698"

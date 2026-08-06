@@ -10,9 +10,11 @@
 # Only lambda-src/<project>/<lambda> directories that actually changed (or
 # have never been deployed) get rebuilt and redeployed - see README.md.
 #
-# Only execution_role_arn and artifact_by_region are required per lambda;
-# runtime/handler/timeout/memory_size default to a small Node.js handler
-# (iacm/variables.tf) and only need to be set if a lambda differs from that.
+# artifact_by_region is the only thing a lambda needs here. The function
+# itself - role, runtime, handler, memory, tags - is defined by its committed
+# harness/<project>/<lambda>/<region>/function-definition.json, which the
+# native deploy step creates or updates the function from. Terraform never
+# touches the function.
 
 project_name = "demo-project"
 
@@ -23,11 +25,10 @@ harness = {
   aws_connector_id    = "aws_lambda_connector"
 }
 
-# Add another entry here to deploy another function from this project.
+# Add another entry here to deploy another function from this project - and
+# a matching harness/demo-project/<key>/<region>/function-definition.json.
 lambdas = {
   api = {
-    execution_role_arn = "arn:aws:iam::915632791698:role/demo-project-api-exec-role"
-
     # AWS requires a Lambda's S3 source to be in the same region as the
     # function, so add an entry here for every region this file is deployed
     # to (us-east-1 always; add us-west-1 too before pushing to
@@ -45,8 +46,6 @@ lambdas = {
   }
 
   worker = {
-    execution_role_arn = "arn:aws:iam::915632791698:role/demo-project-api-exec-role"
-
     artifact_by_region = {
       "us-east-1" = {
         bucket = "lambda-service-poc-artifacts-915632791698"
@@ -60,8 +59,6 @@ lambdas = {
   }
 
   notifier = {
-    execution_role_arn = "arn:aws:iam::915632791698:role/demo-project-api-exec-role"
-
     artifact_by_region = {
       "us-east-1" = {
         bucket = "lambda-service-poc-artifacts-915632791698"
@@ -75,8 +72,6 @@ lambdas = {
   }
 
   scheduler = {
-    execution_role_arn = "arn:aws:iam::915632791698:role/demo-project-api-exec-role"
-
     artifact_by_region = {
       "us-east-1" = {
         bucket = "lambda-service-poc-artifacts-915632791698"

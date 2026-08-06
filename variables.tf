@@ -114,24 +114,6 @@ variable "timeout" {
   default     = 10
 }
 
-variable "lambda_architecture" {
-  description = "Instruction set the function runs on: x86_64 or arm64."
-  type        = string
-  default     = "x86_64"
-}
-
-variable "lambda_environment_variables" {
-  description = "Environment variables exposed to the Lambda function at runtime."
-  type        = map(string)
-  default     = {}
-}
-
-variable "lambda_publish_version" {
-  description = "Publish an immutable numbered version on each code change, so an earlier build can be re-pointed to."
-  type        = bool
-  default     = true
-}
-
 variable "lambda_additional_policy_arns" {
   description = "Extra managed policy ARNs to attach to the execution role beyond basic execution."
   type        = list(string)

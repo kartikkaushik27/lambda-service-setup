@@ -1,13 +1,3 @@
-output "lambda_function_arns" {
-  description = "ARN of every deployed Lambda function, keyed by lambda name."
-  value       = { for key, mod in module.lambda : key => mod.function_arn }
-}
-
-output "lambda_versions" {
-  description = "Published version of every function this run deployed, keyed by lambda name."
-  value       = { for key, mod in module.lambda : key => mod.version }
-}
-
 output "harness_service_ids" {
   description = "Identifier of every Harness service created, keyed by lambda name."
   value       = { for key, mod in module.service : key => mod.service_id }

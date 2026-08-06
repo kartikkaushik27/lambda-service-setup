@@ -26,15 +26,6 @@ harness = {
 
 lambdas = {
   ${lambda_key} = {
-    runtime               = "${runtime}"
-    handler               = "${handler}"
-    timeout               = ${timeout}
-    memory_size           = ${memory_size}
-    execution_role_arn    = "${execution_role_arn}"
-    architecture          = "${architecture}"
-    publish_version       = ${publish_version}
-    environment_variables = ${environment_variables}
-
     artifact_by_region = {
       "${region}" = {
         bucket = "${artifact_bucket}"

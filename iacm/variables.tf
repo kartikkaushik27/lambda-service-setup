@@ -86,18 +86,6 @@ variable "lambdas" {
   description = "Lambda functions this project deploys in this environment/region."
 
   type = map(object({
-    execution_role_arn = string
-
-    # Sane defaults for the common case (a small Node.js handler) - override
-    # per lambda only when it actually differs.
-    runtime               = optional(string, "nodejs20.x")
-    handler               = optional(string, "index.handler")
-    timeout               = optional(number, 10)
-    memory_size           = optional(number, 128)
-    architecture          = optional(string, "x86_64")
-    publish_version       = optional(bool, true)
-    environment_variables = optional(map(string), {})
-
     # Bring-your-own deployment package: this workspace deploys whatever is
     # already at this lambda's bucket/key for var.region. Keyed by region,
     # not a single bucket/key, because AWS requires a Lambda's S3 source to
