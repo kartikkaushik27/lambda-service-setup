@@ -14,16 +14,6 @@ variable "execution_role_arn" {
   type        = string
 }
 
-variable "artifact_bucket" {
-  description = "S3 bucket holding the deployment package."
-  type        = string
-}
-
-variable "artifact_key" {
-  description = "S3 key of the deployment package uploaded by the CI stage."
-  type        = string
-}
-
 variable "runtime" {
   description = "Lambda runtime identifier, e.g. nodejs20.x."
   type        = string

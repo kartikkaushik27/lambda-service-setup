@@ -25,3 +25,4 @@ crash.*.log
 
 # Saved plan files
 tfplan
+modules/lambda/.placeholder/

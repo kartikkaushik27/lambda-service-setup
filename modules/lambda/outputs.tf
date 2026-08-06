@@ -17,8 +17,3 @@ output "version" {
   description = "Published version of the function ($LATEST when publishing is disabled)."
   value       = aws_lambda_function.this.version
 }
-
-output "artifact_version_id" {
-  description = "S3 object version of the deployment package this function was built from."
-  value       = data.aws_s3_object.artifact.version_id
-}

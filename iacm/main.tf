@@ -105,9 +105,6 @@ module "lambda" {
 
   environment_variables = each.value.environment_variables
   publish_version       = each.value.publish_version
-
-  artifact_bucket = each.value.artifact_by_region[var.region].bucket
-  artifact_key    = each.value.artifact_by_region[var.region].key
 }
 
 module "service" {
