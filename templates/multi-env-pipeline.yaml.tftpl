@@ -77,7 +77,7 @@ pipeline:
                         # changed gets a workspace apply this run - otherwise
                         # every push to any project would re-apply every
                         # other project's IACM workspace too.
-                        if ! echo "$changed_files" | grep -qE "^environments/$project\.tfvars\$|^lambda-src/$project/"; then
+                        if ! echo "$changed_files" | grep -qE "^environments/$project\.tfvars\$|^lambda-src/$project/|^harness/$project/"; then
                           echo "SKIP: $project untouched by this push"
                           continue
                         fi
@@ -101,6 +101,8 @@ pipeline:
                             reason=""
                             if echo "$changed_files" | grep -q "^$src/"; then
                               reason="source changed"
+                            elif echo "$changed_files" | grep -q "^harness/$project/$key/"; then
+                              reason="manifest changed"
                             elif ! aws lambda get-function --function-name "$function_name" --region "$region" >/dev/null 2>&1; then
                               reason="not deployed yet"
                             fi
